@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shadow Firewall</string>
+
+    <string name="tab_apps">Apps</string>
+    <string name="tab_traffic">Traffic</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="status_running">Firewall on</string>
+    <string name="status_running_detail">Watching traffic and applying your rules.</string>
+    <string name="status_stopped">Firewall off</string>
+    <string name="status_stopped_detail">Nothing is being inspected or blocked.</string>
+
+    <string name="action_start">Start</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_close">Close</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_reset_rules">Reset all rules</string>
+    <string name="action_block_app">Block this app</string>
+    <string name="action_block_domain">Block this domain</string>
+
+    <string name="search_apps">Search apps</string>
+    <string name="show_system_apps">System apps</string>
+    <string name="app_count">%1$d apps</string>
+    <string name="block_wifi">Block on Wi‑Fi</string>
+    <string name="block_mobile">Block on mobile data</string>
+    <string name="shared_uid_summary">%1$s + %2$d more sharing this user ID</string>
+
+    <string name="filter_all">All</string>
+    <string name="filter_blocked">Blocked</string>
+    <string name="filter_allowed">Allowed</string>
+    <string name="unknown_app">Unknown app (uid %1$d)</string>
+    <string name="traffic_empty_running">No connections yet. Open an app and traffic will show up here.</string>
+    <string name="traffic_empty_stopped">Start the firewall to see what your apps are connecting to.</string>
+
+    <string name="detail_destination">Destination</string>
+    <string name="detail_address">IP address</string>
+    <string name="detail_protocol">Protocol</string>
+    <string name="detail_package">Package</string>
+    <string name="detail_verdict">Verdict</string>
+    <string name="detail_transferred">Transferred</string>
+
+    <string name="reason_app_rule">Blocked by app rule</string>
+    <string name="reason_default_policy">Blocked by default policy</string>
+    <string name="reason_domain">Blocked domain</string>
+    <string name="reason_ipv6">IPv6 disabled</string>
+
+    <string name="settings_policy">Policy</string>
+    <string name="setting_block_by_default">Block by default</string>
+    <string name="setting_block_by_default_summary">Deny every app that you have not explicitly allowed. Expect things to break until you allow what you use.</string>
+    <string name="setting_block_ipv6">Block IPv6</string>
+    <string name="setting_block_ipv6_summary">Drop IPv6 so apps fall back to IPv4. Useful if you want every connection to show up under one address family.</string>
+    <string name="setting_auto_start">Start on boot</string>
+    <string name="setting_auto_start_summary">Bring the firewall back up after a restart, as long as VPN permission is still granted.</string>
+
+    <string name="settings_blocked_domains">Blocked domains</string>
+    <string name="settings_blocked_domains_summary">One per line. Blocking example.com also blocks anything under it, such as ads.example.com.</string>
+    <string name="settings_allowed_domains">Allowed domains</string>
+    <string name="settings_allowed_domains_summary">Exceptions that win over the blocklist. Use these to punch a hole in a broad entry.</string>
+    <string name="domain_placeholder">ads.example.com</string>
+    <string name="domain_count">%1$d entries saved</string>
+
+    <string name="settings_maintenance">Maintenance</string>
+    <string name="settings_reset_summary">Removes every per-app rule and both domain lists. The IPv6 setting is kept.</string>
+    <string name="reset_confirm">This clears all of your app rules and domain lists. It cannot be undone.</string>
+    <string name="settings_footer">Domain rules work by watching plain DNS. Apps that use DNS over HTTPS or hard-coded IP addresses will bypass them, so per-app rules are the reliable layer.</string>
+
+    <string name="notification_channel_name">Firewall status</string>
+    <string name="notification_channel_description">Shows that the firewall tunnel is running.</string>
+    <string name="notification_title">Shadow Firewall is on</string>
+    <plurals name="notification_blocked">
+        <item quantity="one">%1$d connection blocked</item>
+        <item quantity="other">%1$d connections blocked</item>
+    </plurals>
+</resources>
