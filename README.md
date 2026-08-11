@@ -10,6 +10,8 @@ want. No root required.
   `ad.doubleclick.net`), with an allowlist that overrides it.
 - **Block by default** — optional deny-everything-unless-allowed policy.
 
+👉 **Just want it on your phone? Go to [Installing](#installing).**
+
 ## How it works
 
 Android gives a non-rooted app exactly one way to see another app's traffic: become the
@@ -69,14 +71,130 @@ Worth knowing before you rely on it:
   written to disk — a persistent record of every connection a phone makes is a more sensitive
   artefact than this app is worth.
 
-## Building
+## Installing
+
+There are no prebuilt releases, so you build it yourself. Pick whichever route suits you —
+Android Studio is the easy one.
+
+You need a phone or tablet running **Android 10 (API 29) or newer**.
+
+### Option A — Android Studio (easiest)
+
+1. **Install Android Studio** from <https://developer.android.com/studio>. Accept the defaults
+   in the setup wizard; it downloads the Android SDK for you.
+2. **Get the code.** Either `git clone https://github.com/EndXSuffering/Shadowandroid.git`, or
+   download the ZIP from GitHub and unpack it.
+3. **Open it.** In Android Studio choose *File → Open* and select the `Shadowandroid` folder
+   (the one containing `settings.gradle.kts`). Wait for "Gradle sync" to finish in the status
+   bar — the first sync downloads dependencies and can take a few minutes.
+4. **Turn on USB debugging on your phone.** Open *Settings → About phone* and tap **Build
+   number** seven times to unlock developer mode, then go to *Settings → System → Developer
+   options* and switch on **USB debugging**. (The exact menu names vary a little by
+   manufacturer.)
+5. **Plug the phone in.** Accept the "Allow USB debugging?" prompt on the phone. Your device
+   should appear in the dropdown at the top of Android Studio.
+6. **Press Run** (the green ▶ button). Android Studio builds the app, installs it, and launches
+   it.
+
+Then jump to [First run](#first-run).
+
+### Option B — Command line
+
+Use this if you would rather not install Android Studio, or you are building on a server.
+
+**1. Install JDK 17**
 
 ```bash
-./gradlew :app:assembleDebug     # APK at app/build/outputs/apk/debug/
-./gradlew test                   # unit tests for the packet and rule logic
+# macOS
+brew install openjdk@17
+
+# Debian / Ubuntu
+sudo apt install openjdk-17-jdk
+
+# Check it worked
+java -version    # should say 17.x
 ```
 
-Requires JDK 17 and the Android SDK (compileSdk 35).
+**2. Install the Android SDK command-line tools**
+
+Download "Command line tools only" for your OS from
+<https://developer.android.com/studio#command-line-tools-only>, then:
+
+```bash
+# Unpack into the layout the SDK expects
+mkdir -p ~/android-sdk/cmdline-tools
+unzip commandlinetools-*.zip -d ~/android-sdk/cmdline-tools
+mv ~/android-sdk/cmdline-tools/cmdline-tools ~/android-sdk/cmdline-tools/latest
+
+# Point the tooling at it (add these to ~/.bashrc or ~/.zshrc to make them stick)
+export ANDROID_HOME=~/android-sdk
+export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools"
+
+# Install the pieces this project needs and accept the licences
+sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+sdkmanager --licenses
+```
+
+**3. Build the APK**
+
+```bash
+git clone https://github.com/EndXSuffering/Shadowandroid.git
+cd Shadowandroid
+./gradlew :app:assembleDebug
+```
+
+The APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
+
+> If Gradle says it cannot find the SDK, create a `local.properties` file in the project root
+> containing `sdk.dir=/absolute/path/to/android-sdk`.
+
+**4. Install it on your phone**
+
+With USB debugging enabled (steps 4–5 in Option A) and the phone plugged in:
+
+```bash
+adb devices                                             # confirm your phone is listed
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+No cable? Copy `app-debug.apk` to the phone (email, cloud drive, USB file transfer), open it
+with a file manager, and approve the "install unknown apps" prompt when Android asks.
+
+## First run
+
+1. Open **Shadow Firewall**. You land on the **Apps** tab.
+2. Tap **Start**. Android shows a **"Connection request"** dialog explaining that the app wants
+   to set up a VPN — tap **OK**. This is Android's standard warning; it appears for any app that
+   filters traffic. Nothing is sent to a remote server, the tunnel ends on your device.
+3. Allow notifications if prompted. The ongoing notification is how the tunnel stays alive in
+   the background, and it has a **Stop** button.
+4. A small key icon appears in the status bar. That means the firewall is running.
+5. Open any app, then come back to the **Traffic** tab to watch the connections appear.
+6. To block something, either flip the Wi‑Fi or mobile switch next to an app on the **Apps**
+   tab, or tap a row on the **Traffic** tab and choose **Block this app** / **Block this
+   domain**. Rules apply to new connections immediately — no restart needed.
+
+**To turn it off:** tap **Stop** in the app, or **Stop** on the notification. Your rules are
+kept for next time.
+
+**If something stops working**, the Traffic tab is the place to look: find the app, check
+whether its connections say blocked, and flip its switch back off. *Settings → Reset all rules*
+clears everything at once.
+
+**To uninstall:** long-press the icon → *Uninstall*, same as any app. Android drops the VPN
+configuration with it.
+
+## Development
+
+```bash
+./gradlew :core:test             # unit tests for the packet and rule logic
+./gradlew :app:assembleDebug     # debug APK
+./gradlew :app:assembleRelease   # unsigned release APK — you must sign it yourself
+```
+
+Requires JDK 17 and the Android SDK (compileSdk 35). The release build has no signing config,
+so `assembleRelease` produces `app-release-unsigned.apk`; the debug build is the one to use
+unless you are setting up your own keystore.
 
 ## Layout
 
