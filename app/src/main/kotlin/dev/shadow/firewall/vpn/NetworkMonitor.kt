@@ -10,6 +10,7 @@ import android.util.Log
 import dev.shadow.firewall.core.NetworkType
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Tracks which kind of network is underneath the tunnel, so "block on mobile data" can mean
@@ -31,17 +32,36 @@ class NetworkMonitor(context: Context) {
     var dnsServers: List<InetAddress> = emptyList()
         private set
 
+    /** What we currently know about one network the callback has told us about. */
+    private class Link(
+        var capabilities: NetworkCapabilities? = null,
+        var linkProperties: LinkProperties? = null,
+    )
+
+    // Built up from the callback rather than polled. ConnectivityManager.allNetworks was the
+    // obvious way to enumerate these, but it is deprecated, and the callback is both the
+    // supported route and the more accurate one: it only reports networks matching our request.
+    private val links = ConcurrentHashMap<Network, Link>()
+
     private val callback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            links.getOrPut(network) { Link() }
+            recompute()
+        }
+
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-            refresh()
+            links.getOrPut(network) { Link() }.capabilities = capabilities
+            recompute()
         }
 
         override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-            refresh()
+            links.getOrPut(network) { Link() }.linkProperties = linkProperties
+            recompute()
         }
 
         override fun onLost(network: Network) {
-            refresh()
+            links.remove(network)
+            recompute()
         }
     }
 
@@ -58,7 +78,6 @@ class NetworkMonitor(context: Context) {
         } catch (error: SecurityException) {
             Log.w(TAG, "cannot register network callback", error)
         }
-        refresh()
     }
 
     fun stop() {
@@ -66,27 +85,30 @@ class NetworkMonitor(context: Context) {
             connectivityManager.unregisterNetworkCallback(callback)
         } catch (ignored: IllegalArgumentException) {
         }
+        links.clear()
     }
 
-    private fun refresh() {
+    private fun recompute() {
         var type = NetworkType.OTHER
         var servers: List<InetAddress> = emptyList()
 
-        for (network in connectivityManager.allNetworks) {
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: continue
+        for ((_, link) in links) {
+            val capabilities = link.capabilities ?: continue
+            // Defensive: our request excludes VPN transports, so this should never match.
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
             if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
             if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) continue
 
-            type = when {
+            val candidate = when {
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkType.WIFI
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> NetworkType.MOBILE
                 else -> NetworkType.OTHER
             }
-            connectivityManager.getLinkProperties(network)?.dnsServers?.let {
-                if (it.isNotEmpty()) servers = it
-            }
-            // A validated Wi-Fi link wins; keep looking only while we have not found one.
+            // Take this link unless we already settled on Wi-Fi, which wins over the rest.
+            if (type == NetworkType.WIFI && candidate != NetworkType.WIFI) continue
+
+            type = candidate
+            link.linkProperties?.dnsServers?.let { if (it.isNotEmpty()) servers = it }
             if (type == NetworkType.WIFI) break
         }
 
