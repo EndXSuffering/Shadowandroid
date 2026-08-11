@@ -1,5 +1,7 @@
 # Shadow Firewall
 
+[![Build APK](https://github.com/EndXSuffering/Shadowandroid/actions/workflows/build.yml/badge.svg)](https://github.com/EndXSuffering/Shadowandroid/actions/workflows/build.yml)
+
 An Android app that shows you every connection your apps make, and blocks the ones you don't
 want. No root required.
 
@@ -73,12 +75,34 @@ Worth knowing before you rely on it:
 
 ## Installing
 
-There are no prebuilt releases, so you build it yourself. Pick whichever route suits you —
-Android Studio is the easy one.
-
 You need a phone or tablet running **Android 10 (API 29) or newer**.
 
-### Option A — Android Studio (easiest)
+Option A needs nothing installed on your computer. Options B and C build it yourself.
+
+### Option A — Download the APK built by CI (no build needed)
+
+Every push is built automatically by GitHub Actions, and the resulting APK is attached to the
+run.
+
+1. Go to the [**Actions** tab](https://github.com/EndXSuffering/Shadowandroid/actions/workflows/build.yml).
+2. Click the most recent run with a green ✅ tick.
+3. Scroll to **Artifacts** at the bottom and download **shadow-firewall-apk**. You get a ZIP —
+   unzip it to get `shadow-firewall-<commit>.apk`.
+4. Copy the APK to your phone (email it, put it on a cloud drive, or use a USB cable), open it
+   with a file manager, and tap install. Android will ask permission to *install unknown apps*
+   from whichever app you opened it with — allow it.
+
+Two things to know:
+
+- **You need to be signed in to GitHub to download artifacts.** That is a GitHub rule, not this
+  project's. If you are not signed in, the download link does nothing.
+- The APK is signed with Android's standard **debug** key. It installs and runs normally, but
+  it is not a release build, so Play Protect may show an extra "unsafe app blocked" warning —
+  tap *More details → Install anyway*.
+
+Then jump to [First run](#first-run).
+
+### Option B — Android Studio
 
 1. **Install Android Studio** from <https://developer.android.com/studio>. Accept the defaults
    in the setup wizard; it downloads the Android SDK for you.
@@ -98,7 +122,7 @@ You need a phone or tablet running **Android 10 (API 29) or newer**.
 
 Then jump to [First run](#first-run).
 
-### Option B — Command line
+### Option C — Command line
 
 Use this if you would rather not install Android Studio, or you are building on a server.
 
@@ -150,7 +174,7 @@ The APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
 
 **4. Install it on your phone**
 
-With USB debugging enabled (steps 4–5 in Option A) and the phone plugged in:
+With USB debugging enabled (steps 4–5 in Option B) and the phone plugged in:
 
 ```bash
 adb devices                                             # confirm your phone is listed
@@ -195,6 +219,13 @@ configuration with it.
 Requires JDK 17 and the Android SDK (compileSdk 35). The release build has no signing config,
 so `assembleRelease` produces `app-release-unsigned.apk`; the debug build is the one to use
 unless you are setting up your own keystore.
+
+### Continuous integration
+
+`.github/workflows/build.yml` runs on every push and pull request: it runs the `core` unit
+tests, builds the debug APK, and uploads it as the **shadow-firewall-apk** artifact (kept for
+30 days). When a run fails it also uploads the Gradle test and lint reports, which is usually
+enough to see what broke without reproducing it locally.
 
 ## Layout
 
