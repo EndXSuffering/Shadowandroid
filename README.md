@@ -227,6 +227,10 @@ tests, builds the debug APK, and uploads it as the **shadow-firewall-apk** artif
 30 days). When a run fails it also uploads the Gradle test and lint reports, which is usually
 enough to see what broke without reproducing it locally.
 
+`gradle/actions/setup-gradle` validates the checked-in `gradle-wrapper.jar` against the set of
+published Gradle wrapper checksums on every run, so a tampered wrapper fails the build. No
+separate validation step is needed.
+
 ## Layout
 
 | Module | What's in it |
