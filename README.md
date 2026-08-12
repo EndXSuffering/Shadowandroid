@@ -55,9 +55,16 @@ own timeout — and UDP is dropped silently, which is what a UDP sender already 
 exposes to the active VPN app. That API is why the minimum is Android 10 (API 29); on older
 releases the only route was reading `/proc/net/tcp`, which third-party apps lost access to.
 
-**Domain rules** work by watching plain DNS on port 53. Queries for a blocked name are answered
-with NXDOMAIN and never forwarded; responses for everything else are parsed so the traffic log
-can show hostnames instead of bare IPs.
+**Domain rules** are enforced against the DNS query, not the connection. A query for a blocked
+name is answered with NXDOMAIN and never forwarded; responses for everything else are parsed so
+the traffic log can show hostnames instead of bare IPs.
+
+That distinction matters. The IP-to-hostname map built from those responses is only ever used
+for *display*, never to decide a block. One address routinely serves many names — claude.ai and
+a blocked tracker can share a Cloudflare address, a storefront and its ad subdomain share a
+CloudFront one — so the last name seen for an address says nothing reliable about the next
+connection to it. Blocking on that reverse lookup silently takes down whatever else lives on the
+same CDN.
 
 ## Ad and malware lists
 
@@ -109,6 +116,9 @@ Worth knowing before you rely on it:
   on the connection rather than the lookup, so those still hold — they are the reliable layer.
 - **Blocklists are third-party data.** They are maintained by other people and occasionally
   block something you wanted. The allowed-domains list overrides any of them.
+- **MMS may not work while the tunnel is up.** Picture messages are often carried on a separate
+  carrier APN that a VPN cannot reach, which is a routing problem rather than a blocking one.
+  Ordinary SMS is unaffected: it travels on the cellular control channel and never touches IP.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN.
 - **ICMP is dropped**, so `ping` will not work while the tunnel is up. Relaying it needs a raw
   socket, which a non-rooted app cannot open.

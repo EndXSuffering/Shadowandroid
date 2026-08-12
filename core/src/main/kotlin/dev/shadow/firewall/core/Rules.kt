@@ -59,8 +59,8 @@ data class Decision(
 }
 
 /**
- * Decides allow or block for a flow. Called once per new connection, not per packet, so it
- * can afford the string work in [matches].
+ * Decides allow or block. Called once per DNS query and once per new connection, never per
+ * packet, so it can afford the string work in [matches].
  */
 class RuleEngine(rules: RuleSet = RuleSet()) {
 
@@ -75,6 +75,38 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
     @Volatile
     var blocklists: BlocklistIndex = BlocklistIndex.EMPTY
 
+    /**
+     * Verdict for a DNS query, where the name is exactly what the app asked for.
+     *
+     * This is the only place a hostname is trusted enough to block on. A blocked name is
+     * answered with NXDOMAIN and never resolves, so the connection is never attempted.
+     */
+    fun decideHostname(hostname: String): Decision {
+        val snapshot = rules
+        // The user's allowlist is the escape hatch for a list's false positive, so it is
+        // checked before anything that could block.
+        if (matches(hostname, snapshot.allowedDomains)) return Decision.ALLOW
+
+        if (matches(hostname, snapshot.blockedDomains)) {
+            return Decision.block(BlockReason.DOMAIN_BLOCKLIST)
+        }
+        if (snapshot.useBlocklists) {
+            blocklists.match(hostname)?.let { list ->
+                return Decision.block(BlockReason.SUBSCRIBED_LIST, list.title)
+            }
+        }
+        return Decision.ALLOW
+    }
+
+    /**
+     * Verdict for a connection.
+     *
+     * [hostname] here is a *reverse* lookup — the last name we saw resolve to this address —
+     * and on shared hosting it is regularly the wrong one. claude.ai and a blocked tracker
+     * can sit on the same Cloudflare address; a storefront and its ad subdomain share a
+     * CloudFront one. So a reverse-derived name may only ever permit a connection, never
+     * condemn it. Domain blocking belongs in [decideHostname], against the query itself.
+     */
     fun decide(
         uid: Int,
         network: NetworkType,
@@ -89,26 +121,12 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
             return Decision.block(BlockReason.IPV6_DISABLED)
         }
 
-        // The user's own allowlist overrides every domain rule, including the subscribed
-        // lists. It is the only escape hatch when a list has a false positive, so nothing
-        // downstream is allowed to override it.
-        if (hostname != null && !matches(hostname, snapshot.allowedDomains)) {
-            if (matches(hostname, snapshot.blockedDomains)) {
-                return Decision.block(BlockReason.DOMAIN_BLOCKLIST)
-            }
-            if (snapshot.useBlocklists) {
-                blocklists.match(hostname)?.let { list ->
-                    return Decision.block(BlockReason.SUBSCRIBED_LIST, list.title)
-                }
-            }
-        }
+        // Permissive use of the reverse name is safe: the worst case is letting something
+        // through that the DNS-time check would already have caught.
+        val allowlisted = hostname != null && matches(hostname, snapshot.allowedDomains)
 
-        // Address rules apply even when there was no lookup to inspect, which is what makes
-        // them the one part of a list that DNS-over-HTTPS cannot route around. The user's
-        // domain allowlist still wins, via the hostname branch above.
-        if (snapshot.useBlocklists && destinationAddress != null &&
-            (hostname == null || !matches(hostname, snapshot.allowedDomains))
-        ) {
+        // Address rules are literal IPs taken from the lists, so they carry no ambiguity.
+        if (snapshot.useBlocklists && destinationAddress != null && !allowlisted) {
             blocklists.matchAddress(destinationAddress)?.let { list ->
                 return Decision.block(BlockReason.SUBSCRIBED_LIST, list.title)
             }

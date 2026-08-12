@@ -2,7 +2,7 @@ package dev.shadow.firewall.vpn
 
 import android.util.Log
 import dev.shadow.firewall.core.ConnectionEvent
-import dev.shadow.firewall.core.BlockReason
+import dev.shadow.firewall.core.Decision
 import dev.shadow.firewall.core.Dns
 import dev.shadow.firewall.core.FlowKey
 import dev.shadow.firewall.core.HostnameCache
@@ -235,9 +235,11 @@ class TunnelRelay(
         if (message.isResponse) return false
         val name = message.queryName ?: return false
 
-        val rules = ruleEngine.rules
-        if (RuleEngine.matches(name, rules.allowedDomains)) return false
-        if (!RuleEngine.matches(name, rules.blockedDomains)) return false
+        // Every domain rule is enforced here, against the name the app actually asked for.
+        // Deciding from a reverse lookup on the connection instead would misfire constantly
+        // on shared hosting, where one address serves both a tracker and something wanted.
+        val decision = ruleEngine.decideHostname(name)
+        if (!decision.isBlocked) return false
 
         val reply = Dns.buildNxDomain(packet.data, datagram.payloadOffset, datagram.payloadLength)
             ?: return false
@@ -252,7 +254,7 @@ class TunnelRelay(
             ),
         )
 
-        logBlockedLookup(key, packet, datagram, name)
+        logBlockedLookup(key, packet, datagram, name, decision)
         return true
     }
 
@@ -321,6 +323,7 @@ class TunnelRelay(
         packet: IpPacket,
         datagram: UdpDatagram,
         name: String,
+        decision: Decision,
     ) {
         flowsBlocked++
         val lookupKey = key.copy(sourcePort = 0) // one entry per domain, not per query socket
@@ -349,7 +352,8 @@ class TunnelRelay(
                 hostname = name,
                 network = networkMonitor.currentType,
                 verdict = Verdict.BLOCK,
-                reason = BlockReason.DOMAIN_BLOCKLIST,
+                reason = decision.reason,
+                ruleSource = decision.source,
             ),
         )
     }

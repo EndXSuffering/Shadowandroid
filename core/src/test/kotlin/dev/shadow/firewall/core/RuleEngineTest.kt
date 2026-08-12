@@ -70,7 +70,7 @@ class RuleEngineTest {
         val subject = engine(RuleSet(blockedDomains = setOf("doubleclick.net")))
 
         for (host in listOf("doubleclick.net", "ad.doubleclick.net", "a.b.c.doubleclick.net")) {
-            val decision = subject.decide(chromeUid, NetworkType.WIFI, host, false)
+            val decision = subject.decideHostname(host)
             assertEquals(Verdict.BLOCK, decision.verdict, host)
             assertEquals(BlockReason.DOMAIN_BLOCKLIST, decision.reason)
         }
@@ -80,8 +80,8 @@ class RuleEngineTest {
     fun `domain blocklist does not match a lookalike suffix`() {
         val subject = engine(RuleSet(blockedDomains = setOf("example.com")))
         // "notexample.com" ends with the entry as a string but is a different domain.
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "notexample.com", false).verdict)
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "example.com.evil.net", false).verdict)
+        assertEquals(Verdict.ALLOW, subject.decideHostname("notexample.com").verdict)
+        assertEquals(Verdict.ALLOW, subject.decideHostname("example.com.evil.net").verdict)
     }
 
     @Test
@@ -92,15 +92,15 @@ class RuleEngineTest {
                 allowedDomains = setOf("cdn.example.com"),
             ),
         )
-        assertEquals(Verdict.BLOCK, subject.decide(chromeUid, NetworkType.WIFI, "ads.example.com", false).verdict)
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "cdn.example.com", false).verdict)
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "img.cdn.example.com", false).verdict)
+        assertEquals(Verdict.BLOCK, subject.decideHostname("ads.example.com").verdict)
+        assertEquals(Verdict.ALLOW, subject.decideHostname("cdn.example.com").verdict)
+        assertEquals(Verdict.ALLOW, subject.decideHostname("img.cdn.example.com").verdict)
     }
 
     @Test
     fun `domain matching ignores case and a trailing root dot`() {
         val subject = engine(RuleSet(blockedDomains = setOf("tracker.io")))
-        assertEquals(Verdict.BLOCK, subject.decide(chromeUid, NetworkType.WIFI, "API.Tracker.IO.", false).verdict)
+        assertEquals(Verdict.BLOCK, subject.decideHostname("API.Tracker.IO.").verdict)
     }
 
     @Test
@@ -120,8 +120,8 @@ class RuleEngineTest {
 
         // Blocked by the app rule even though the host is not on the domain list.
         assertEquals(BlockReason.APP_RULE, subject.decide(gameUid, NetworkType.WIFI, "cdn.example.org", false).reason)
-        // The domain list still applies to apps with no rule of their own.
-        assertEquals(BlockReason.DOMAIN_BLOCKLIST, subject.decide(chromeUid, NetworkType.WIFI, "ads.example.com", false).reason)
+        // The domain list is enforced at query time rather than on the connection.
+        assertEquals(BlockReason.DOMAIN_BLOCKLIST, subject.decideHostname("ads.example.com").reason)
     }
 
     @Test
@@ -158,8 +158,8 @@ class RuleEngineTest {
     }
 
     @Test
-    fun `a subscribed list blocks a domain and names itself`() {
-        val decision = engineWithLists().decide(chromeUid, NetworkType.WIFI, "ad.doubleclick.net", false)
+    fun `a subscribed list blocks a looked-up domain and names itself`() {
+        val decision = engineWithLists().decideHostname("ad.doubleclick.net")
         assertEquals(Verdict.BLOCK, decision.verdict)
         assertEquals(BlockReason.SUBSCRIBED_LIST, decision.reason)
         assertEquals("Test ad list", decision.source)
@@ -167,21 +167,52 @@ class RuleEngineTest {
 
     @Test
     fun `a list's own exception is honoured`() {
-        val subject = engineWithLists()
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "safe.doubleclick.net", false).verdict)
+        assertEquals(Verdict.ALLOW, engineWithLists().decideHostname("safe.doubleclick.net").verdict)
     }
 
     @Test
     fun `the user allowlist overrides a subscribed list`() {
         val subject = engineWithLists(RuleSet(allowedDomains = setOf("doubleclick.net")))
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "ad.doubleclick.net", false).verdict)
+        assertEquals(Verdict.ALLOW, subject.decideHostname("ad.doubleclick.net").verdict)
     }
 
     @Test
     fun `the master switch disables subscribed lists without discarding them`() {
         val subject = engineWithLists(RuleSet(useBlocklists = false))
-        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "ad.doubleclick.net", false).verdict)
+        assertEquals(Verdict.ALLOW, subject.decideHostname("ad.doubleclick.net").verdict)
         assertEquals(1, subject.blocklists.lists.size)
+    }
+
+    // -------------------------------- shared-address regressions
+
+    @Test
+    fun `a connection is never blocked because of a reverse-looked-up hostname`() {
+        // The bug this guards: claude.ai and a blocked tracker share a Cloudflare address,
+        // so the IP-to-name cache hands the connection the tracker's name. Acting on that
+        // took down claude.ai, Amazon and RCS messaging on a real device.
+        val subject = engineWithLists()
+        val decision = subject.decide(
+            chromeUid, NetworkType.WIFI,
+            hostname = "tracker.example.org", // on the list, but only a reverse guess
+            isIpv6 = false,
+            destinationAddress = "104.18.0.1",
+        )
+        assertEquals(Verdict.ALLOW, decision.verdict)
+    }
+
+    @Test
+    fun `the same name still blocks when it comes from an actual query`() {
+        assertEquals(Verdict.BLOCK, engineWithLists().decideHostname("tracker.example.org").verdict)
+    }
+
+    @Test
+    fun `a user-blocked domain is also not enforced from a reverse lookup`() {
+        val subject = engine(RuleSet(blockedDomains = setOf("tracker.example.org")))
+        assertEquals(
+            Verdict.ALLOW,
+            subject.decide(chromeUid, NetworkType.WIFI, "tracker.example.org", false, "104.18.0.1").verdict,
+        )
+        assertEquals(Verdict.BLOCK, subject.decideHostname("tracker.example.org").verdict)
     }
 
     @Test
@@ -197,6 +228,17 @@ class RuleEngineTest {
         val decision = engineWithLists()
             .decide(chromeUid, NetworkType.WIFI, null, false, destinationAddress = "93.184.216.34")
         assertEquals(Verdict.ALLOW, decision.verdict)
+    }
+
+    @Test
+    fun `an address rule still fires when the reverse name is a blocked one`() {
+        // Address rules are literal IPs from the list, so they are exact and stay in force
+        // even though the reverse hostname beside them is untrustworthy.
+        val decision = engineWithLists().decide(
+            chromeUid, NetworkType.WIFI, "tracker.example.org", false, "109.201.135.46",
+        )
+        assertEquals(Verdict.BLOCK, decision.verdict)
+        assertEquals(BlockReason.SUBSCRIBED_LIST, decision.reason)
     }
 
     @Test
