@@ -140,7 +140,12 @@ private fun EmptyTraffic(vpnRunning: Boolean) {
 private fun TrafficRow(event: ConnectionEvent, onClick: () -> Unit) {
     val blocked = event.verdict == Verdict.BLOCK
     // stringResource is composable, so the reason has to be resolved before buildString.
-    val reasonText = if (blocked) stringResource(reasonLabel(event.reason)) else null
+    val reasonText = when {
+        !blocked -> null
+        // For a subscribed list, naming the list is more use than "blocked by a list".
+        event.reason == BlockReason.SUBSCRIBED_LIST && event.ruleSource != null -> event.ruleSource
+        else -> stringResource(reasonLabel(event.reason))
+    }
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -222,7 +227,7 @@ private fun ConnectionActions(
                 DetailLine(
                     stringResource(R.string.detail_verdict),
                     if (event.verdict == Verdict.BLOCK) {
-                        stringResource(reasonLabel(event.reason))
+                        event.ruleSource ?: stringResource(reasonLabel(event.reason))
                     } else {
                         stringResource(R.string.filter_allowed)
                     },
@@ -268,6 +273,7 @@ private fun reasonLabel(reason: BlockReason): Int = when (reason) {
     BlockReason.APP_RULE -> R.string.reason_app_rule
     BlockReason.DEFAULT_POLICY -> R.string.reason_default_policy
     BlockReason.DOMAIN_BLOCKLIST -> R.string.reason_domain
+    BlockReason.SUBSCRIBED_LIST -> R.string.reason_subscribed_list
     BlockReason.IPV6_DISABLED -> R.string.reason_ipv6
     BlockReason.NONE -> R.string.filter_allowed
 }

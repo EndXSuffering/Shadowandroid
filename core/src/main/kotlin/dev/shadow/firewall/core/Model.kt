@@ -31,8 +31,11 @@ enum class BlockReason {
     /** No explicit rule, and the default policy is "block". */
     DEFAULT_POLICY,
 
-    /** The resolved hostname matched the domain blocklist. */
+    /** The resolved hostname matched the user's own domain blocklist. */
     DOMAIN_BLOCKLIST,
+
+    /** The resolved hostname matched one of the subscribed ad or malware lists. */
+    SUBSCRIBED_LIST,
 
     /** IPv6 is switched off, so v6 flows are dropped to force a v4 fallback. */
     IPV6_DISABLED,
@@ -65,6 +68,8 @@ data class ConnectionEvent(
     val network: NetworkType,
     val verdict: Verdict,
     val reason: BlockReason,
+    /** Which subscribed list matched, when the reason is [BlockReason.SUBSCRIBED_LIST]. */
+    val ruleSource: String? = null,
     val bytesOut: Long = 0,
     val bytesIn: Long = 0,
 ) {

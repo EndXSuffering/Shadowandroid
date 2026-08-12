@@ -143,4 +143,77 @@ class RuleEngineTest {
     fun `matching an empty blocklist is cheap and false`() {
         assertFalse(RuleEngine.matches("anything.example.com", emptySet()))
     }
+
+    // ------------------------------------------------ subscribed lists
+
+    private fun engineWithLists(rules: RuleSet = RuleSet()): RuleEngine {
+        val list = Blocklist(
+            id = "ads",
+            title = "Test ad list",
+            blocked = DomainHashSet.build(listOf("doubleclick.net", "tracker.example.org")),
+            allowed = DomainHashSet.build(listOf("safe.doubleclick.net")),
+            blockedAddresses = DomainHashSet.build(listOf("109.201.135.46")),
+        )
+        return RuleEngine(rules).apply { blocklists = BlocklistIndex(listOf(list)) }
+    }
+
+    @Test
+    fun `a subscribed list blocks a domain and names itself`() {
+        val decision = engineWithLists().decide(chromeUid, NetworkType.WIFI, "ad.doubleclick.net", false)
+        assertEquals(Verdict.BLOCK, decision.verdict)
+        assertEquals(BlockReason.SUBSCRIBED_LIST, decision.reason)
+        assertEquals("Test ad list", decision.source)
+    }
+
+    @Test
+    fun `a list's own exception is honoured`() {
+        val subject = engineWithLists()
+        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "safe.doubleclick.net", false).verdict)
+    }
+
+    @Test
+    fun `the user allowlist overrides a subscribed list`() {
+        val subject = engineWithLists(RuleSet(allowedDomains = setOf("doubleclick.net")))
+        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "ad.doubleclick.net", false).verdict)
+    }
+
+    @Test
+    fun `the master switch disables subscribed lists without discarding them`() {
+        val subject = engineWithLists(RuleSet(useBlocklists = false))
+        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, "ad.doubleclick.net", false).verdict)
+        assertEquals(1, subject.blocklists.lists.size)
+    }
+
+    @Test
+    fun `an address rule blocks even when no hostname is known`() {
+        val decision = engineWithLists()
+            .decide(chromeUid, NetworkType.WIFI, null, false, destinationAddress = "109.201.135.46")
+        assertEquals(Verdict.BLOCK, decision.verdict)
+        assertEquals(BlockReason.SUBSCRIBED_LIST, decision.reason)
+    }
+
+    @Test
+    fun `an unlisted address is allowed`() {
+        val decision = engineWithLists()
+            .decide(chromeUid, NetworkType.WIFI, null, false, destinationAddress = "93.184.216.34")
+        assertEquals(Verdict.ALLOW, decision.verdict)
+    }
+
+    @Test
+    fun `the user allowlist also overrides an address rule`() {
+        val subject = engineWithLists(RuleSet(allowedDomains = setOf("known.example.com")))
+        val decision = subject.decide(
+            chromeUid, NetworkType.WIFI, "known.example.com", false,
+            destinationAddress = "109.201.135.46",
+        )
+        assertEquals(Verdict.ALLOW, decision.verdict)
+    }
+
+    @Test
+    fun `an app rule still beats a subscribed list allowing the host`() {
+        val subject = engineWithLists(
+            RuleSet().withAppRule(AppRule(gameUid, blockWifi = true, blockMobile = true)),
+        )
+        assertEquals(BlockReason.APP_RULE, subject.decide(gameUid, NetworkType.WIFI, "example.com", false).reason)
+    }
 }

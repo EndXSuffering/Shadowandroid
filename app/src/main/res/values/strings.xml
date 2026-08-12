@@ -46,6 +46,7 @@
     <string name="reason_app_rule">Blocked by app rule</string>
     <string name="reason_default_policy">Blocked by default policy</string>
     <string name="reason_domain">Blocked domain</string>
+    <string name="reason_subscribed_list">Blocked by a list</string>
     <string name="reason_ipv6">IPv6 disabled</string>
 
     <string name="settings_policy">Policy</string>
@@ -55,6 +56,26 @@
     <string name="setting_block_ipv6_summary">Drop IPv6 so apps fall back to IPv4. Useful if you want every connection to show up under one address family.</string>
     <string name="setting_auto_start">Start on boot</string>
     <string name="setting_auto_start_summary">Bring the firewall back up after a restart, as long as VPN permission is still granted.</string>
+
+    <string name="settings_blocklists">Ad and malware lists</string>
+    <string name="setting_use_blocklists">Use subscribed lists</string>
+    <string name="blocklist_total">%1$s domains and addresses loaded</string>
+    <string name="blocklist_total_empty">Nothing downloaded yet</string>
+    <string name="blocklist_category_ads">Ads and tracking</string>
+    <string name="blocklist_category_malware">Malware, phishing and scams</string>
+    <string name="blocklist_entry_summary">%1$s entries · updated %2$s</string>
+    <string name="blocklist_not_downloaded">Not downloaded yet</string>
+    <string name="blocklist_heavy">Large</string>
+    <string name="blocklist_last_error">Last update failed: %1$s</string>
+    <string name="blocklist_update_every">Check for updates</string>
+    <string name="frequency_6_hours">Every 6h</string>
+    <string name="frequency_daily">Daily</string>
+    <string name="frequency_weekly">Weekly</string>
+    <string name="frequency_manual">Manual</string>
+    <string name="setting_unmetered_only">Only update on Wi\u2011Fi</string>
+    <string name="setting_unmetered_only_summary">Keeps list downloads off your mobile data allowance.</string>
+    <string name="action_update_now">Update now</string>
+    <string name="blocklist_footer">Lists are maintained by third parties and can occasionally block something you want. Add the domain to the allowed list below to override any of them.</string>
 
     <string name="settings_blocked_domains">Blocked domains</string>
     <string name="settings_blocked_domains_summary">One per line. Blocking example.com also blocks anything under it, such as ads.example.com.</string>

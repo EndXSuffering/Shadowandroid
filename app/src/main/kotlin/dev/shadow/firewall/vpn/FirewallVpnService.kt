@@ -102,10 +102,16 @@ class FirewallVpnService : VpnService() {
             // which routes the interface gets, so it cannot be applied afterwards.
             val initial = app.ruleStore.settings.first()
             ruleEngine.rules = initial.rules
+            ruleEngine.blocklists = app.blocklistRepository.index.value
             establishedWithIpv6Blocked = initial.rules.blockIpv6
 
             bringUp(app)
             starting = false
+
+            // Blocklists refresh on their own schedule, so track them separately.
+            launch {
+                app.blocklistRepository.index.collect { ruleEngine.blocklists = it }
+            }
 
             // Keep the engine's snapshot in step with what the user configures from here on.
             app.ruleStore.settings.collect { settings ->

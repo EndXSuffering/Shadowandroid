@@ -282,7 +282,7 @@ class TunnelRelay(
         val destination = key.destinationAddress
         val hostname = hostnames.get(destination)
         val network = networkMonitor.currentType
-        val decision = ruleEngine.decide(uid, network, hostname, packet.isIpv6)
+        val decision = ruleEngine.decide(uid, network, hostname, packet.isIpv6, destination)
 
         if (decision.isBlocked) {
             flowsBlocked++
@@ -310,6 +310,7 @@ class TunnelRelay(
                 network = network,
                 verdict = decision.verdict,
                 reason = decision.reason,
+                ruleSource = decision.source,
             ),
         )
         return Judgement(decision.isBlocked, eventId)

@@ -31,6 +31,8 @@ data class RuleSet(
     val allowedDomains: Set<String> = emptySet(),
     /** Drop IPv6 so apps fall back to IPv4, where per-app rules are easier to reason about. */
     val blockIpv6: Boolean = false,
+    /** Master switch for the subscribed ad and malware lists. */
+    val useBlocklists: Boolean = true,
 ) {
     fun withAppRule(rule: AppRule): RuleSet {
         val next = appRules.toMutableMap()
@@ -41,12 +43,18 @@ data class RuleSet(
     fun ruleFor(uid: Int): AppRule = appRules[uid] ?: AppRule(uid)
 }
 
-data class Decision(val verdict: Verdict, val reason: BlockReason) {
+data class Decision(
+    val verdict: Verdict,
+    val reason: BlockReason,
+    /** Which subscribed list matched, when [reason] is [BlockReason.SUBSCRIBED_LIST]. */
+    val source: String? = null,
+) {
     val isBlocked: Boolean get() = verdict == Verdict.BLOCK
 
     companion object {
         val ALLOW = Decision(Verdict.ALLOW, BlockReason.NONE)
-        fun block(reason: BlockReason) = Decision(Verdict.BLOCK, reason)
+        fun block(reason: BlockReason, source: String? = null) =
+            Decision(Verdict.BLOCK, reason, source)
     }
 }
 
@@ -59,11 +67,21 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
     @Volatile
     var rules: RuleSet = rules
 
+    /**
+     * The subscribed ad and malware lists. Held separately from [rules] because the two are
+     * updated on completely different schedules: rules when the user taps a switch, lists
+     * when the background refresh finishes.
+     */
+    @Volatile
+    var blocklists: BlocklistIndex = BlocklistIndex.EMPTY
+
     fun decide(
         uid: Int,
         network: NetworkType,
         hostname: String?,
         isIpv6: Boolean,
+        /** The connection's destination IP, matched against the lists' address rules. */
+        destinationAddress: String? = null,
     ): Decision {
         val snapshot = rules
 
@@ -71,9 +89,28 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
             return Decision.block(BlockReason.IPV6_DISABLED)
         }
 
+        // The user's own allowlist overrides every domain rule, including the subscribed
+        // lists. It is the only escape hatch when a list has a false positive, so nothing
+        // downstream is allowed to override it.
         if (hostname != null && !matches(hostname, snapshot.allowedDomains)) {
             if (matches(hostname, snapshot.blockedDomains)) {
                 return Decision.block(BlockReason.DOMAIN_BLOCKLIST)
+            }
+            if (snapshot.useBlocklists) {
+                blocklists.match(hostname)?.let { list ->
+                    return Decision.block(BlockReason.SUBSCRIBED_LIST, list.title)
+                }
+            }
+        }
+
+        // Address rules apply even when there was no lookup to inspect, which is what makes
+        // them the one part of a list that DNS-over-HTTPS cannot route around. The user's
+        // domain allowlist still wins, via the hostname branch above.
+        if (snapshot.useBlocklists && destinationAddress != null &&
+            (hostname == null || !matches(hostname, snapshot.allowedDomains))
+        ) {
+            blocklists.matchAddress(destinationAddress)?.let { list ->
+                return Decision.block(BlockReason.SUBSCRIBED_LIST, list.title)
             }
         }
 

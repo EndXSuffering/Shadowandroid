@@ -10,6 +10,8 @@ want. No root required.
 - **Block per app** — separate Wi-Fi and mobile-data switches for each installed app.
 - **Block per domain** — a suffix-matched blocklist (`doubleclick.net` also covers
   `ad.doubleclick.net`), with an allowlist that overrides it.
+- **Subscribed ad and malware lists** — curated third-party lists that refresh in the
+  background, on by default. Roughly 370,000 domains out of the box.
 - **Block by default** — optional deny-everything-unless-allowed policy.
 
 👉 **Just want it on your phone? Go to [Installing](#installing).**
@@ -57,13 +59,56 @@ releases the only route was reading `/proc/net/tcp`, which third-party apps lost
 with NXDOMAIN and never forwarded; responses for everything else are parsed so the traffic log
 can show hostnames instead of bare IPs.
 
+## Ad and malware lists
+
+Out of the box the app subscribes to a set of maintained lists and refreshes them daily:
+
+| List | Category | Approximate size | Default |
+| --- | --- | --- | --- |
+| AdGuard DNS filter | Ads and tracking | 154,000 | on |
+| Phishing Army | Phishing | 156,000 | on |
+| ShadowWhisperer's malware list | Malware | 43,000 | on |
+| Dandelion Sprout's anti-malware list | Malware | 12,000 | on |
+| Scam blocklist | Scams | 1,000 | on |
+| AdGuard popup hosts | Ads | 1,000 | off |
+| StevenBlack unified hosts | Ads and malware | 98,000 | off |
+| HaGeZi threat intelligence feeds | Malware | 2,200,000 | off |
+
+They come from the [AdGuard hostlists registry](https://github.com/AdguardTeam/HostlistsRegistry),
+which mirrors the upstream lists at stable URLs in one consistent format, so the app needs one
+parser and one host it depends on rather than a dozen of each. StevenBlack's hosts file is
+taken from its own repository as the canonical example of that format.
+
+**Memory.** A `HashSet<String>` of two million domains costs about 180 MB, which no phone will
+tolerate for a background service. Domains are stored instead as sorted 64-bit hashes — 8 bytes
+each, looked up by binary search — so the default set of lists is about 3 MB and even the
+2.2-million-entry threat feed fits in 18 MB. The cost is that a hash collision would block a
+domain that is not on the list; at these sizes that is around a one-in-ten-million chance, well
+under the false-positive rate of the lists themselves, and the user's allowlist always wins.
+
+**IP-address rules.** Malware lists carry entries like `||109.201.135.46^` for hosts reached
+without any lookup. Because this firewall sees the destination address of every connection, it
+enforces those directly — the one part of a list that DNS-over-HTTPS cannot route around.
+
+**What is not imported.** Rules that cannot be honoured at this level are dropped rather than
+approximated: regular expressions, cosmetic rules, partial wildcards like
+`ad-host-*.example.com`, path rules such as `||example.com/ads/banner.png`, and rules carrying
+modifiers that narrow them (`$denyallow`, `$client`, `$dnstype`). Blocking the whole host for a
+path rule would take down the site. In practice this drops well under 1% of a typical list.
+
+Every list can be switched off individually, the whole feature has a master switch, and
+refreshes can be limited to Wi‑Fi or set to manual only.
+
 ## Limitations
 
 Worth knowing before you rely on it:
 
 - **DNS over HTTPS/TLS bypasses domain rules.** If an app resolves names over HTTPS (Chrome and
-  Firefox do by default), the firewall never sees the query. Per-app rules still apply, because
-  they act on the connection rather than the lookup — that is the reliable layer.
+  Firefox do by default), the firewall never sees the query, so neither your domain rules nor
+  the subscribed lists' domain entries apply. Per-app rules and the lists' IP-address rules act
+  on the connection rather than the lookup, so those still hold — they are the reliable layer.
+- **Blocklists are third-party data.** They are maintained by other people and occasionally
+  block something you wanted. The allowed-domains list overrides any of them.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN.
 - **ICMP is dropped**, so `ping` will not work while the tunnel is up. Relaying it needs a raw
   socket, which a non-rooted app cannot open.
@@ -249,6 +294,9 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 | `core/…/IpPacket.kt` | Zero-copy parsing of IP/TCP/UDP headers |
 | `core/…/PacketFactory.kt` | Builds the packets sent back to apps, and all checksums |
 | `core/…/Rules.kt` | The verdict logic |
+| `core/…/DomainHashSet.kt` | Sorted-hash domain set, the memory trick that makes big lists viable |
+| `core/…/BlocklistParser.kt` | Reads hosts, AdGuard and plain-domain list formats |
+| `app/…/rules/BlocklistRepository.kt` | Downloads, caches and loads the subscribed lists |
 | `core/…/Dns.kt` | Query/response parsing and NXDOMAIN synthesis |
 | `app/…/vpn/TunnelRelay.kt` | Reads the tun device, applies verdicts, owns the flow table |
 | `app/…/vpn/TcpFlow.kt` | The userspace TCP state machine |
@@ -257,9 +305,14 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 
 ## Testing status
 
-`core/` has 47 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
+`core/` has 94 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
 wrapping, RST generation, DNS parsing (including compression-pointer loops and truncated
-input), suffix matching, and cache expiry. Run them with `./gradlew :core:test`.
+input), suffix matching, cache expiry, blocklist parsing across all three formats, and the
+hash-set index. Run them with `./gradlew :core:test`.
+
+The parser was also run over the real lists it ships with — 464,000 rules across six files —
+to check the extraction rate and confirm that none of twenty popular domains (google.com,
+github.com, wikipedia.org and so on) came out blocked.
 
 The `app/` module has no automated tests yet. The relay's behaviour under real traffic —
 handshakes, flow control, teardown — has not been exercised against a device.

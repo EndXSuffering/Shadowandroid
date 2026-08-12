@@ -46,6 +46,9 @@ import dev.shadow.firewall.R
 @Composable
 fun SettingsScreen(viewModel: FirewallViewModel, modifier: Modifier = Modifier) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val blocklistStatuses by viewModel.blocklistStatuses.collectAsStateWithLifecycle()
+    val refreshing by viewModel.blocklistRefreshing.collectAsStateWithLifecycle()
+    val entryCount by viewModel.blocklistEntryCount.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
 
     Column(
@@ -77,6 +80,20 @@ fun SettingsScreen(viewModel: FirewallViewModel, modifier: Modifier = Modifier) 
                 onCheckedChange = viewModel::setAutoStartOnBoot,
             )
         }
+
+        BlocklistSection(
+            statuses = blocklistStatuses,
+            useBlocklists = settings.rules.useBlocklists,
+            frequency = settings.updateFrequency,
+            unmeteredOnly = settings.updateOnUnmeteredOnly,
+            refreshing = refreshing,
+            totalEntries = entryCount,
+            onUseBlocklists = viewModel::setUseBlocklists,
+            onToggleList = viewModel::setBlocklistEnabled,
+            onFrequency = viewModel::setUpdateFrequency,
+            onUnmeteredOnly = viewModel::setUpdateOnUnmeteredOnly,
+            onUpdateNow = viewModel::updateBlocklistsNow,
+        )
 
         DomainListCard(
             title = stringResource(R.string.settings_blocked_domains),

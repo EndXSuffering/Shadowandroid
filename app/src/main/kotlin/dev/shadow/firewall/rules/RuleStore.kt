@@ -11,6 +11,7 @@ import dev.shadow.firewall.core.AppRule
 import dev.shadow.firewall.core.RuleEngine
 import dev.shadow.firewall.core.RuleSet
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -29,6 +30,31 @@ private data class StoredRules(
     val blockedDomains: List<String> = emptyList(),
     val allowedDomains: List<String> = emptyList(),
     val autoStartOnBoot: Boolean = false,
+    val useBlocklists: Boolean = true,
+    /** Null means "never configured", which is how the defaults get applied exactly once. */
+    val enabledBlocklists: List<String>? = null,
+    val updateFrequency: String = UpdateFrequency.DAILY.name,
+    val updateOnUnmeteredOnly: Boolean = true,
+    val blocklistMetadata: Map<String, BlocklistMetadata> = emptyMap(),
+)
+
+/** Per-list download bookkeeping, so a refresh can be conditional and failures are visible. */
+@Serializable
+data class BlocklistMetadata(
+    val etag: String? = null,
+    val lastModified: String? = null,
+    val updatedAtMillis: Long = 0,
+    val entryCount: Int = 0,
+    val addressCount: Int = 0,
+    val lastError: String? = null,
+)
+
+/** Everything about the subscribed lists, read as a unit by the repository. */
+data class BlocklistState(
+    val enabledIds: Set<String>,
+    val frequency: UpdateFrequency,
+    val unmeteredOnly: Boolean,
+    val metadata: Map<String, BlocklistMetadata>,
 )
 
 @Serializable
@@ -42,6 +68,9 @@ private data class StoredAppRule(
 data class FirewallSettings(
     val rules: RuleSet = RuleSet(),
     val autoStartOnBoot: Boolean = false,
+    val enabledBlocklists: Set<String> = BlocklistCatalog.defaultEnabledIds,
+    val updateFrequency: UpdateFrequency = UpdateFrequency.DAILY,
+    val updateOnUnmeteredOnly: Boolean = true,
 )
 
 /**
@@ -57,25 +86,36 @@ class RuleStore(private val context: Context) {
 
     val settings: Flow<FirewallSettings> = context.dataStore.data.map { preferences ->
         val raw = preferences[KEY_RULES] ?: return@map FirewallSettings()
-        try {
-            json.decodeFromString<StoredRules>(raw).toSettings()
-        } catch (error: Exception) {
-            Log.w(TAG, "stored rules were unreadable, falling back to defaults", error)
-            FirewallSettings()
+        decode(raw)?.toSettings() ?: FirewallSettings()
+    }
+
+    suspend fun update(transform: (FirewallSettings) -> FirewallSettings) = editStored { stored ->
+        // Metadata is not part of FirewallSettings, so carry it across untouched.
+        transform(stored.toSettings()).toStored().copy(blocklistMetadata = stored.blocklistMetadata)
+    }
+
+    /** Reads, transforms and writes the stored document under the DataStore lock. */
+    private suspend fun editStored(transform: (StoredRules) -> StoredRules) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[KEY_RULES]?.let { decode(it) } ?: StoredRules()
+            preferences[KEY_RULES] = json.encodeToString(transform(current))
         }
     }
 
-    suspend fun update(transform: (FirewallSettings) -> FirewallSettings) {
-        context.dataStore.edit { preferences ->
-            val current = preferences[KEY_RULES]
-                ?.let {
-                    runCatching { json.decodeFromString<StoredRules>(it).toSettings() }
-                        .getOrDefault(FirewallSettings())
-                }
-                ?: FirewallSettings()
-            preferences[KEY_RULES] = json.encodeToString(transform(current).toStored())
+    private suspend fun readStored(): StoredRules =
+        context.dataStore.data.first().let { preferences ->
+            preferences[KEY_RULES]?.let { decode(it) } ?: StoredRules()
         }
+
+    private fun decode(raw: String): StoredRules? = try {
+        json.decodeFromString<StoredRules>(raw)
+    } catch (error: Exception) {
+        Log.w(TAG, "stored rules were unreadable, falling back to defaults", error)
+        null
     }
+
+    private fun parseFrequency(name: String): UpdateFrequency =
+        runCatching { UpdateFrequency.valueOf(name) }.getOrDefault(UpdateFrequency.DAILY)
 
     suspend fun setAppRule(rule: AppRule) = update { it.copy(rules = it.rules.withAppRule(rule)) }
 
@@ -103,7 +143,78 @@ class RuleStore(private val context: Context) {
     }
 
     suspend fun clearAllRules() = update {
-        it.copy(rules = RuleSet(blockIpv6 = it.rules.blockIpv6))
+        it.copy(rules = RuleSet(blockIpv6 = it.rules.blockIpv6, useBlocklists = it.rules.useBlocklists))
+    }
+
+    // ------------------------------------------------------------ blocklists
+
+    suspend fun setUseBlocklists(enabled: Boolean) =
+        update { it.copy(rules = it.rules.copy(useBlocklists = enabled)) }
+
+    suspend fun setBlocklistEnabled(id: String, enabled: Boolean) = update {
+        val next = it.enabledBlocklists.toMutableSet()
+        if (enabled) next.add(id) else next.remove(id)
+        it.copy(enabledBlocklists = next)
+    }
+
+    suspend fun setUpdateFrequency(frequency: UpdateFrequency) =
+        update { it.copy(updateFrequency = frequency) }
+
+    suspend fun setUpdateOnUnmeteredOnly(enabled: Boolean) =
+        update { it.copy(updateOnUnmeteredOnly = enabled) }
+
+    /** A snapshot for the repository, which needs the metadata the settings flow omits. */
+    suspend fun blocklistState(): BlocklistState {
+        val stored = readStored()
+        return BlocklistState(
+            enabledIds = stored.enabledBlocklists?.toSet() ?: BlocklistCatalog.defaultEnabledIds,
+            frequency = parseFrequency(stored.updateFrequency),
+            unmeteredOnly = stored.updateOnUnmeteredOnly,
+            metadata = stored.blocklistMetadata,
+        )
+    }
+
+    suspend fun recordBlocklistSuccess(
+        id: String,
+        etag: String?,
+        lastModified: String?,
+        entryCount: Int,
+        addressCount: Int,
+    ) = updateMetadata(id) {
+        BlocklistMetadata(
+            etag = etag,
+            lastModified = lastModified,
+            updatedAtMillis = System.currentTimeMillis(),
+            entryCount = entryCount,
+            addressCount = addressCount,
+            lastError = null,
+        )
+    }
+
+    /** A 304: the data we already hold is current, so only the timestamp moves. */
+    suspend fun recordBlocklistUnchanged(id: String) = updateMetadata(id) { previous ->
+        (previous ?: BlocklistMetadata()).copy(
+            updatedAtMillis = System.currentTimeMillis(),
+            lastError = null,
+        )
+    }
+
+    suspend fun recordBlocklistFailure(id: String, message: String) = updateMetadata(id) { previous ->
+        // Keep the counts and validators: a failed refresh does not invalidate what we have.
+        (previous ?: BlocklistMetadata()).copy(lastError = message)
+    }
+
+    suspend fun clearBlocklistMetadata(id: String) = editStored { stored ->
+        stored.copy(blocklistMetadata = stored.blocklistMetadata - id)
+    }
+
+    private suspend fun updateMetadata(
+        id: String,
+        transform: (BlocklistMetadata?) -> BlocklistMetadata,
+    ) = editStored { stored ->
+        stored.copy(
+            blocklistMetadata = stored.blocklistMetadata + (id to transform(stored.blocklistMetadata[id])),
+        )
     }
 
     private fun parseDomains(text: String): Set<String> =
@@ -113,17 +224,25 @@ class RuleStore(private val context: Context) {
         rules = RuleSet(
             blockByDefault = blockByDefault,
             blockIpv6 = blockIpv6,
+            useBlocklists = useBlocklists,
             appRules = apps.associate { it.uid to AppRule(it.uid, it.blockWifi, it.blockMobile) },
             allowedUids = allowedUids.toSet(),
             blockedDomains = RuleEngine.normaliseAll(blockedDomains),
             allowedDomains = RuleEngine.normaliseAll(allowedDomains),
         ),
         autoStartOnBoot = autoStartOnBoot,
+        enabledBlocklists = enabledBlocklists?.toSet() ?: BlocklistCatalog.defaultEnabledIds,
+        updateFrequency = parseFrequency(updateFrequency),
+        updateOnUnmeteredOnly = updateOnUnmeteredOnly,
     )
 
     private fun FirewallSettings.toStored() = StoredRules(
         blockByDefault = rules.blockByDefault,
         blockIpv6 = rules.blockIpv6,
+        useBlocklists = rules.useBlocklists,
+        enabledBlocklists = enabledBlocklists.toList().sorted(),
+        updateFrequency = updateFrequency.name,
+        updateOnUnmeteredOnly = updateOnUnmeteredOnly,
         apps = rules.appRules.values.map { StoredAppRule(it.uid, it.blockWifi, it.blockMobile) },
         allowedUids = rules.allowedUids.toList(),
         blockedDomains = rules.blockedDomains.toList().sorted(),

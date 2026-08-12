@@ -8,8 +8,11 @@ import dev.shadow.firewall.core.AppRule
 import dev.shadow.firewall.core.ConnectionEvent
 import dev.shadow.firewall.core.NetworkType
 import dev.shadow.firewall.core.Verdict
+import dev.shadow.firewall.rules.BlocklistStatus
+import dev.shadow.firewall.rules.BlocklistWorker
 import dev.shadow.firewall.rules.FirewallSettings
 import dev.shadow.firewall.rules.InstalledApp
+import dev.shadow.firewall.rules.UpdateFrequency
 import dev.shadow.firewall.vpn.FirewallVpnService
 import dev.shadow.firewall.vpn.VpnState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -75,8 +79,54 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // ------------------------------------------------------- blocklists
+
+    val blocklistStatuses: StateFlow<List<BlocklistStatus>> = app.blocklistRepository.statuses
+    val blocklistRefreshing: StateFlow<Boolean> = app.blocklistRepository.refreshing
+
+    val blocklistEntryCount: StateFlow<Int> = app.blocklistRepository.index
+        .map { it.totalEntries }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    fun setUseBlocklists(enabled: Boolean) {
+        viewModelScope.launch { app.ruleStore.setUseBlocklists(enabled) }
+    }
+
+    fun setBlocklistEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            app.ruleStore.setBlocklistEnabled(id, enabled)
+            // Switching a list on should fetch it now rather than at the next scheduled run;
+            // switching one off should free its cache immediately.
+            if (enabled) app.blocklistRepository.refresh() else app.blocklistRepository.forget(id)
+        }
+    }
+
+    fun setUpdateFrequency(frequency: UpdateFrequency) {
+        viewModelScope.launch {
+            app.ruleStore.setUpdateFrequency(frequency)
+            rescheduleRefresh()
+        }
+    }
+
+    fun setUpdateOnUnmeteredOnly(enabled: Boolean) {
+        viewModelScope.launch {
+            app.ruleStore.setUpdateOnUnmeteredOnly(enabled)
+            rescheduleRefresh()
+        }
+    }
+
+    fun updateBlocklistsNow() {
+        viewModelScope.launch { app.blocklistRepository.refresh(force = true) }
+    }
+
+    private suspend fun rescheduleRefresh() {
+        val state = app.ruleStore.blocklistState()
+        BlocklistWorker.schedule(app, state.frequency, state.unmeteredOnly)
+    }
+
     init {
         refreshApps()
+        viewModelScope.launch { app.blocklistRepository.publishStatuses() }
     }
 
     fun refreshApps() {
