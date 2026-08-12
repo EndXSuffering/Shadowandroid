@@ -32,7 +32,7 @@
     <string name="filter_all">All</string>
     <string name="filter_blocked">Blocked</string>
     <string name="filter_allowed">Allowed</string>
-    <string name="unknown_app">Unknown app (uid %1$d)</string>
+    <string name="unknown_app">Unattributed (uid %1$d)</string>
     <string name="traffic_empty_running">No connections yet. Open an app and traffic will show up here.</string>
     <string name="traffic_empty_stopped">Start the firewall to see what your apps are connecting to.</string>
 
@@ -41,6 +41,7 @@
     <string name="detail_protocol">Protocol</string>
     <string name="detail_package">Package</string>
     <string name="detail_verdict">Verdict</string>
+    <string name="detail_uid">User ID</string>
     <string name="detail_transferred">Transferred</string>
 
     <string name="reason_app_rule">Blocked by app rule</string>

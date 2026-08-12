@@ -40,9 +40,16 @@ class UidResolver(private val connectivityManager: ConnectivityManager) {
     ): Int {
         cache[key]?.let { return it }
 
-        val uid = lookup(key.protocol, source, sourcePort, destination, destinationPort)
-        // Only cache a definite answer; an unknown result may just be a lost race with the
-        // kernel, and the next packet on this flow may well resolve.
+        // A first miss is usually a race: we ask as the flow is being set up, and the socket
+        // may not be in the kernel's table for another moment. One retry costs a syscall and
+        // turns a good share of "unattributed" rows into a named app. A TCP flow is only
+        // judged once, at its SYN, so there is no later opportunity to try again.
+        var uid = lookup(key.protocol, source, sourcePort, destination, destinationPort)
+        if (uid == unknownUid) {
+            uid = lookup(key.protocol, source, sourcePort, destination, destinationPort)
+        }
+
+        // Only cache a definite answer; an unknown one may resolve on a later flow.
         if (uid != unknownUid) cache[key] = uid
         return uid
     }

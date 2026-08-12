@@ -55,6 +55,14 @@ own timeout — and UDP is dropped silently, which is what a UDP sender already 
 exposes to the active VPN app. That API is why the minimum is Android 10 (API 29); on older
 releases the only route was reading `/proc/net/tcp`, which third-party apps lost access to.
 
+Not every connection can be traced back to an installed app, and the reasons differ enough to
+be worth telling apart. Android's own daemons own no package — the DNS resolver carries every
+lookup on the device and appears as uid 1051 — sandboxed browser renderers own no package, an
+app uninstalled since the connection was logged no longer has one, and a uid from a work
+profile carries a 100000 offset. The log names each of those rather than calling them all
+unknown. A connection whose owner the kernel could not report at all is labelled
+*Unattributed*, which usually means the socket closed before the lookup could match it.
+
 **Domain rules** are enforced against the DNS query, not the connection. A query for a blocked
 name is answered with NXDOMAIN and never forwarded; responses for everything else are parsed so
 the traffic log can show hostnames instead of bare IPs.

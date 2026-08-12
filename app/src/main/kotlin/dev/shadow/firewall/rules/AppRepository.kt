@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.os.Process
+import dev.shadow.firewall.core.UidNames
 import dev.shadow.firewall.vpn.AppIdentity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -59,32 +60,48 @@ class AppRepository(context: Context) {
         }.sortedWith(compareBy({ it.isSystem }, { it.label.lowercase() }))
     }
 
-    /** Resolves a uid to a package and label; safe to call from the tunnel threads. */
+    /**
+     * Resolves a uid to a package and label; safe to call from the tunnel threads.
+     *
+     * Four sources are tried in order, because the package manager alone leaves a lot of
+     * ordinary traffic nameless: Android's own daemons own no package, sandboxed renderers
+     * own no package, and an app uninstalled since the connection was logged no longer has
+     * one either. Anything still unnamed is at least classified rather than called unknown.
+     */
     @Synchronized
     fun identify(uid: Int): AppIdentity {
         identityCache[uid]?.let { return it }
 
-        val identity = when {
-            uid == Process.INVALID_UID || uid < 0 -> AppIdentity(null, null)
-            uid == Process.ROOT_UID -> AppIdentity("root", "Root")
-            uid == Process.SYSTEM_UID -> AppIdentity("android", "Android System")
-            else -> {
-                val names = packageManager.getPackagesForUid(uid)
-                if (names.isNullOrEmpty()) {
-                    AppIdentity(null, null)
-                } else {
-                    val name = names.sorted().first()
-                    val label = runCatching {
-                        packageManager.getApplicationLabel(
-                            packageManager.getApplicationInfo(name, 0),
-                        ).toString()
-                    }.getOrNull()
-                    AppIdentity(name, label ?: name)
-                }
-            }
-        }
+        val identity = resolveIdentity(uid)
         identityCache[uid] = identity
         return identity
+    }
+
+    private fun resolveIdentity(uid: Int): AppIdentity {
+        if (uid == Process.INVALID_UID || uid < 0) {
+            return AppIdentity(null, UidNames.describe(uid))
+        }
+
+        // 1. The normal case: one or more installed packages share this uid.
+        packageManager.getPackagesForUid(uid)?.takeIf { it.isNotEmpty() }?.let { names ->
+            val name = names.sorted().first()
+            val label = runCatching {
+                packageManager.getApplicationLabel(packageManager.getApplicationInfo(name, 0))
+                    .toString()
+            }.getOrNull()
+            return AppIdentity(name, label ?: name)
+        }
+
+        // 2. A shared user ID, which getPackagesForUid does not always answer for.
+        runCatching { packageManager.getNameForUid(uid) }.getOrNull()?.let { shared ->
+            return AppIdentity(shared, UidNames.systemService(uid) ?: shared)
+        }
+
+        // 3. One of Android's service uids, which never has a package.
+        UidNames.systemService(uid)?.let { return AppIdentity(null, it) }
+
+        // 4. Nothing can name it, so say what kind of uid it is.
+        return AppIdentity(null, UidNames.describe(uid))
     }
 
     @Synchronized

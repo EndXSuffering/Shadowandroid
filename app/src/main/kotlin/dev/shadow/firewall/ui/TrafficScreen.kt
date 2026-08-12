@@ -43,6 +43,7 @@ import dev.shadow.firewall.R
 import dev.shadow.firewall.core.BlockReason
 import dev.shadow.firewall.core.ConnectionEvent
 import dev.shadow.firewall.core.IpProto
+import dev.shadow.firewall.core.UidNames
 import dev.shadow.firewall.core.Verdict
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -163,6 +164,11 @@ private fun TrafficRow(event: ConnectionEvent, onClick: () -> Unit) {
                 Text(
                     text = event.appLabel ?: stringResource(R.string.unknown_app, event.uid),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = if (event.packageName == null) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -236,6 +242,15 @@ private fun ConnectionActions(
                     stringResource(R.string.detail_transferred),
                     "↑ ${formatBytes(event.bytesOut)}   ↓ ${formatBytes(event.bytesIn)}",
                 )
+                DetailLine(stringResource(R.string.detail_uid), event.uid.toString())
+                UidNames.unattributedExplanation(event.uid)?.let { explanation ->
+                    Text(
+                        text = explanation,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
         },
         confirmButton = {
