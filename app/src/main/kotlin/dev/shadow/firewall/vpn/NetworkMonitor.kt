@@ -32,6 +32,15 @@ class NetworkMonitor(context: Context) {
     var dnsServers: List<InetAddress> = emptyList()
         private set
 
+    /**
+     * Set when the user pinned a specific Private DNS hostname ("strict" mode). Android then
+     * has no cleartext fallback, so refusing port 853 would leave the device with no DNS at
+     * all — the encrypted-DNS block has to stand down.
+     */
+    @Volatile
+    var strictPrivateDnsHostname: String? = null
+        private set
+
     /** What we currently know about one network the callback has told us about. */
     private class Link(
         var capabilities: NetworkCapabilities? = null,
@@ -91,6 +100,7 @@ class NetworkMonitor(context: Context) {
     private fun recompute() {
         var type = NetworkType.OTHER
         var servers: List<InetAddress> = emptyList()
+        var strictPrivateDns: String? = null
 
         for ((_, link) in links) {
             val capabilities = link.capabilities ?: continue
@@ -108,12 +118,17 @@ class NetworkMonitor(context: Context) {
             if (type == NetworkType.WIFI && candidate != NetworkType.WIFI) continue
 
             type = candidate
-            link.linkProperties?.dnsServers?.let { if (it.isNotEmpty()) servers = it }
+            link.linkProperties?.let { properties ->
+                properties.dnsServers.let { if (it.isNotEmpty()) servers = it }
+                // Non-null only in strict mode; opportunistic DoT leaves it unset.
+                properties.privateDnsServerName?.let { strictPrivateDns = it }
+            }
             if (type == NetworkType.WIFI) break
         }
 
         currentType = type
         dnsServers = servers.ifEmpty { FALLBACK_DNS }
+        strictPrivateDnsHostname = strictPrivateDns
     }
 
     /** DNS servers to hand the tunnel, preferring IPv4 when IPv6 is switched off. */

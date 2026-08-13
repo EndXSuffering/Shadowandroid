@@ -169,6 +169,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { app.ruleStore.setBlockByDefault(enabled) }
     }
 
+    fun setBlockEncryptedDns(enabled: Boolean) {
+        viewModelScope.launch { app.ruleStore.setBlockEncryptedDns(enabled) }
+    }
+
     fun setBlockIpv6(enabled: Boolean) {
         viewModelScope.launch { app.ruleStore.setBlockIpv6(enabled) }
     }

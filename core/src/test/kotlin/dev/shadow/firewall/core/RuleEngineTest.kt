@@ -183,6 +183,45 @@ class RuleEngineTest {
         assertEquals(1, subject.blocklists.lists.size)
     }
 
+    // ----------------------------------------- encrypted dns
+
+    @Test
+    fun `a doh bootstrap name is refused so lookups fall back to cleartext`() {
+        val decision = engine(RuleSet()).decideHostname("mozilla.cloudflare-dns.com")
+        assertEquals(Verdict.BLOCK, decision.verdict)
+        assertEquals(BlockReason.ENCRYPTED_DNS, decision.reason)
+    }
+
+    @Test
+    fun `subdomains of a doh provider are covered`() {
+        assertEquals(Verdict.BLOCK, engine(RuleSet()).decideHostname("foo.dns.nextdns.io").verdict)
+    }
+
+    @Test
+    fun `an ordinary hostname is not mistaken for a resolver`() {
+        assertEquals(Verdict.ALLOW, engine(RuleSet()).decideHostname("dns.example.com").verdict)
+        assertEquals(Verdict.ALLOW, engine(RuleSet()).decideHostname("google.com").verdict)
+    }
+
+    @Test
+    fun `turning the setting off leaves encrypted dns alone`() {
+        val subject = engine(RuleSet(blockEncryptedDns = false))
+        assertEquals(Verdict.ALLOW, subject.decideHostname("dns.google").verdict)
+    }
+
+    @Test
+    fun `the user allowlist overrides the encrypted dns rule`() {
+        val subject = engine(RuleSet(allowedDomains = setOf("dns.google")))
+        assertEquals(Verdict.ALLOW, subject.decideHostname("dns.google").verdict)
+    }
+
+    @Test
+    fun `the dot port is recognised and ordinary ports are not`() {
+        assertTrue(EncryptedDns.isEncryptedTransportPort(853))
+        assertFalse(EncryptedDns.isEncryptedTransportPort(443))
+        assertFalse(EncryptedDns.isEncryptedTransportPort(53))
+    }
+
     // -------------------------------- shared-address regressions
 
     @Test

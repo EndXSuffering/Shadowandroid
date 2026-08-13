@@ -67,6 +67,13 @@ fun SettingsScreen(viewModel: FirewallViewModel, modifier: Modifier = Modifier) 
             )
             HorizontalDivider()
             SettingsSwitch(
+                title = stringResource(R.string.setting_block_encrypted_dns),
+                summary = stringResource(R.string.setting_block_encrypted_dns_summary),
+                checked = settings.rules.blockEncryptedDns,
+                onCheckedChange = viewModel::setBlockEncryptedDns,
+            )
+            HorizontalDivider()
+            SettingsSwitch(
                 title = stringResource(R.string.setting_block_ipv6),
                 summary = stringResource(R.string.setting_block_ipv6_summary),
                 checked = settings.rules.blockIpv6,

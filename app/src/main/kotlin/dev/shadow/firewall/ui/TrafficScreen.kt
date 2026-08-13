@@ -290,6 +290,7 @@ private fun reasonLabel(reason: BlockReason): Int = when (reason) {
     BlockReason.DOMAIN_BLOCKLIST -> R.string.reason_domain
     BlockReason.SUBSCRIBED_LIST -> R.string.reason_subscribed_list
     BlockReason.IPV6_DISABLED -> R.string.reason_ipv6
+    BlockReason.ENCRYPTED_DNS -> R.string.reason_encrypted_dns
     BlockReason.NONE -> R.string.filter_allowed
 }
 

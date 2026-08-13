@@ -39,6 +39,9 @@ enum class BlockReason {
 
     /** IPv6 is switched off, so v6 flows are dropped to force a v4 fallback. */
     IPV6_DISABLED,
+
+    /** Encrypted DNS refused so lookups fall back to a transport that can be filtered. */
+    ENCRYPTED_DNS,
 }
 
 /** Identifies one transport flow inside the tunnel. */

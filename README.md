@@ -118,10 +118,15 @@ refreshes can be limited to Wi‑Fi or set to manual only.
 
 Worth knowing before you rely on it:
 
-- **DNS over HTTPS/TLS bypasses domain rules.** If an app resolves names over HTTPS (Chrome and
-  Firefox do by default), the firewall never sees the query, so neither your domain rules nor
-  the subscribed lists' domain entries apply. Per-app rules and the lists' IP-address rules act
-  on the connection rather than the lookup, so those still hold — they are the reliable layer.
+- **Encrypted DNS hides lookups, and *Force filterable DNS* is the answer.** Since Android 9
+  the Private DNS setting defaults to "Automatic", which quietly upgrades lookups to
+  DNS-over-TLS on port 853 whenever the resolver supports it; Chrome and Firefox go further
+  and use DNS-over-HTTPS to their own provider. A filter watching port 53 then sees nothing
+  and blocks nothing, with no sign it has stopped working. The setting refuses port 853 and
+  the known DoH bootstrap names so lookups fall back to a form that can be filtered. It stands
+  down automatically if you pinned a specific Private DNS server, because there is no
+  cleartext fallback in that mode and blocking it would leave you with no DNS at all. A client
+  with hard-coded provider addresses still gets through.
 - **Blocklists are third-party data.** They are maintained by other people and occasionally
   block something you wanted. The allowed-domains list overrides any of them.
 - **MMS may not work while the tunnel is up.** Picture messages are often carried on a separate

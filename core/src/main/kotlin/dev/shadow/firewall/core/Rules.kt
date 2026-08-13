@@ -33,6 +33,11 @@ data class RuleSet(
     val blockIpv6: Boolean = false,
     /** Master switch for the subscribed ad and malware lists. */
     val useBlocklists: Boolean = true,
+    /**
+     * Refuse DNS-over-TLS and the known DNS-over-HTTPS bootstrap names, so lookups fall back
+     * to cleartext where the domain rules can actually see them.
+     */
+    val blockEncryptedDns: Boolean = true,
 ) {
     fun withAppRule(rule: AppRule): RuleSet {
         val next = appRules.toMutableMap()
@@ -87,6 +92,11 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
         // checked before anything that could block.
         if (matches(hostname, snapshot.allowedDomains)) return Decision.ALLOW
 
+        // Refusing the bootstrap name sends a browser back to the system resolver, where
+        // the rest of these rules apply. Checked before the lists so the reason is accurate.
+        if (snapshot.blockEncryptedDns && EncryptedDns.isProviderHostname(hostname)) {
+            return Decision.block(BlockReason.ENCRYPTED_DNS)
+        }
         if (matches(hostname, snapshot.blockedDomains)) {
             return Decision.block(BlockReason.DOMAIN_BLOCKLIST)
         }

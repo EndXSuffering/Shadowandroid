@@ -3,7 +3,9 @@ package dev.shadow.firewall.vpn
 import android.util.Log
 import dev.shadow.firewall.core.ConnectionEvent
 import dev.shadow.firewall.core.Decision
+import dev.shadow.firewall.core.BlockReason
 import dev.shadow.firewall.core.Dns
+import dev.shadow.firewall.core.EncryptedDns
 import dev.shadow.firewall.core.FlowKey
 import dev.shadow.firewall.core.HostnameCache
 import dev.shadow.firewall.core.IpPacket
@@ -67,6 +69,15 @@ class TunnelRelay(
     @Volatile var flowsBlocked: Long = 0; private set
     @Volatile var flowsAllowed: Long = 0; private set
 
+    /**
+     * Cleartext DNS queries we were able to inspect. If this stays at zero while traffic
+     * flows, lookups are going out encrypted and no domain rule can be applied to them —
+     * which is the single most confusing way for this app to appear broken.
+     */
+    @Volatile var dnsQueriesSeen: Long = 0; private set
+    @Volatile var dnsQueriesBlocked: Long = 0; private set
+    @Volatile var encryptedDnsRefused: Long = 0; private set
+
     fun start() {
         if (!running.compareAndSet(false, true)) return
         readerThread = Thread(::readLoop, "tun-reader").apply { isDaemon = true; start() }
@@ -128,6 +139,13 @@ class TunnelRelay(
     private fun handleTcp(packet: IpPacket, segment: TcpSegment) {
         val key = flowKey(IpProto.TCP, packet, segment.sourcePort, segment.destinationPort)
 
+        if (segment.isSyn && shouldRefuseEncryptedDns(segment.destinationPort)) {
+            encryptedDnsRefused++
+            sink.write(PacketFactory.buildRstFor(segment))
+            logEncryptedDnsRefusal(key, packet, segment.sourcePort, segment.destinationPort)
+            return
+        }
+
         tcpFlows[key]?.let { existing ->
             if (!existing.isClosed) {
                 existing.onSegment(segment)
@@ -174,6 +192,15 @@ class TunnelRelay(
 
     private fun handleUdp(packet: IpPacket, datagram: UdpDatagram) {
         val key = flowKey(IpProto.UDP, packet, datagram.sourcePort, datagram.destinationPort)
+
+        // DNS-over-QUIC shares the DoT port number.
+        if (shouldRefuseEncryptedDns(datagram.destinationPort)) {
+            encryptedDnsRefused++
+            if (shouldLogBlock(key)) {
+                logEncryptedDnsRefusal(key, packet, datagram.sourcePort, datagram.destinationPort)
+            }
+            return
+        }
 
         // DNS is inspected per query, not per flow: one socket to the resolver carries every
         // lookup an app makes, so a flow-level verdict would be far too coarse.
@@ -234,12 +261,14 @@ class TunnelRelay(
             ?: return false
         if (message.isResponse) return false
         val name = message.queryName ?: return false
+        dnsQueriesSeen++
 
         // Every domain rule is enforced here, against the name the app actually asked for.
         // Deciding from a reverse lookup on the connection instead would misfire constantly
         // on shared hosting, where one address serves both a tracker and something wanted.
         val decision = ruleEngine.decideHostname(name)
         if (!decision.isBlocked) return false
+        dnsQueriesBlocked++
 
         val reply = Dns.buildNxDomain(packet.data, datagram.payloadOffset, datagram.payloadLength)
             ?: return false
@@ -256,6 +285,48 @@ class TunnelRelay(
 
         logBlockedLookup(key, packet, datagram, name, decision)
         return true
+    }
+
+    /**
+     * Whether to refuse an encrypted-DNS connection so the resolver falls back to cleartext.
+     *
+     * Declines to act in strict Private DNS mode: there the user pinned a DoT server and
+     * Android has no cleartext fallback, so refusing it would take DNS down completely.
+     */
+    private fun shouldRefuseEncryptedDns(destinationPort: Int): Boolean =
+        EncryptedDns.isEncryptedTransportPort(destinationPort) &&
+            ruleEngine.rules.blockEncryptedDns &&
+            networkMonitor.strictPrivateDnsHostname == null
+
+    private fun logEncryptedDnsRefusal(
+        key: FlowKey,
+        packet: IpPacket,
+        sourcePort: Int,
+        destinationPort: Int,
+    ) {
+        flowsBlocked++
+        val uid = uidResolver.resolve(
+            key, packet.sourceAddress, sourcePort, packet.destinationAddress, destinationPort,
+        )
+        val identity = identify(uid)
+        val now = System.currentTimeMillis()
+        onEvent(
+            ConnectionEvent(
+                id = nextEventId.getAndIncrement(),
+                startedAtMillis = now,
+                updatedAtMillis = now,
+                uid = uid,
+                packageName = identity.packageName,
+                appLabel = identity.label,
+                protocol = key.protocol,
+                destinationAddress = key.destinationAddress,
+                destinationPort = destinationPort,
+                hostname = hostnames.get(key.destinationAddress),
+                network = networkMonitor.currentType,
+                verdict = Verdict.BLOCK,
+                reason = BlockReason.ENCRYPTED_DNS,
+            ),
+        )
     }
 
     private fun recordDnsResponse(payload: ByteArray) {

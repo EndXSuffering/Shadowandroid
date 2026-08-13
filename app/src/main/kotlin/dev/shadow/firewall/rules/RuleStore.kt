@@ -31,6 +31,7 @@ private data class StoredRules(
     val allowedDomains: List<String> = emptyList(),
     val autoStartOnBoot: Boolean = false,
     val useBlocklists: Boolean = true,
+    val blockEncryptedDns: Boolean = true,
     /** Null means "never configured", which is how the defaults get applied exactly once. */
     val enabledBlocklists: List<String>? = null,
     val updateFrequency: String = UpdateFrequency.DAILY.name,
@@ -143,13 +144,22 @@ class RuleStore(private val context: Context) {
     }
 
     suspend fun clearAllRules() = update {
-        it.copy(rules = RuleSet(blockIpv6 = it.rules.blockIpv6, useBlocklists = it.rules.useBlocklists))
+        it.copy(
+            rules = RuleSet(
+                blockIpv6 = it.rules.blockIpv6,
+                useBlocklists = it.rules.useBlocklists,
+                blockEncryptedDns = it.rules.blockEncryptedDns,
+            ),
+        )
     }
 
     // ------------------------------------------------------------ blocklists
 
     suspend fun setUseBlocklists(enabled: Boolean) =
         update { it.copy(rules = it.rules.copy(useBlocklists = enabled)) }
+
+    suspend fun setBlockEncryptedDns(enabled: Boolean) =
+        update { it.copy(rules = it.rules.copy(blockEncryptedDns = enabled)) }
 
     suspend fun setBlocklistEnabled(id: String, enabled: Boolean) = update {
         val next = it.enabledBlocklists.toMutableSet()
@@ -225,6 +235,7 @@ class RuleStore(private val context: Context) {
             blockByDefault = blockByDefault,
             blockIpv6 = blockIpv6,
             useBlocklists = useBlocklists,
+            blockEncryptedDns = blockEncryptedDns,
             appRules = apps.associate { it.uid to AppRule(it.uid, it.blockWifi, it.blockMobile) },
             allowedUids = allowedUids.toSet(),
             blockedDomains = RuleEngine.normaliseAll(blockedDomains),
@@ -240,6 +251,7 @@ class RuleStore(private val context: Context) {
         blockByDefault = rules.blockByDefault,
         blockIpv6 = rules.blockIpv6,
         useBlocklists = rules.useBlocklists,
+        blockEncryptedDns = rules.blockEncryptedDns,
         enabledBlocklists = enabledBlocklists.toList().sorted(),
         updateFrequency = updateFrequency.name,
         updateOnUnmeteredOnly = updateOnUnmeteredOnly,

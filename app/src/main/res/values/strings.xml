@@ -49,10 +49,13 @@
     <string name="reason_domain">Blocked domain</string>
     <string name="reason_subscribed_list">Blocked by a list</string>
     <string name="reason_ipv6">IPv6 disabled</string>
+    <string name="reason_encrypted_dns">Encrypted DNS refused</string>
 
     <string name="settings_policy">Policy</string>
     <string name="setting_block_by_default">Block by default</string>
     <string name="setting_block_by_default_summary">Deny every app that you have not explicitly allowed. Expect things to break until you allow what you use.</string>
+    <string name="setting_block_encrypted_dns">Force filterable DNS</string>
+    <string name="setting_block_encrypted_dns_summary">Android encrypts DNS by default, which hides lookups from this app and stops domain rules working. This refuses DNS-over-TLS so lookups fall back to a form that can be filtered. Ignored if you set a specific Private DNS server.</string>
     <string name="setting_block_ipv6">Block IPv6</string>
     <string name="setting_block_ipv6_summary">Drop IPv6 so apps fall back to IPv4. Useful if you want every connection to show up under one address family.</string>
     <string name="setting_auto_start">Start on boot</string>
