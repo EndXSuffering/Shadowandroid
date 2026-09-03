@@ -27,6 +27,11 @@
     <string name="app_count">%1$d apps</string>
     <string name="block_wifi">Block on Wi‑Fi</string>
     <string name="block_mobile">Block on mobile data</string>
+    <string name="bypass_title">Skip the firewall</string>
+    <string name="bypass_summary">This app\'s traffic goes straight out, exactly as if the firewall were off. Nothing about it is filtered, blocked or logged.</string>
+    <string name="bypass_badge">Skipping firewall</string>
+    <string name="bypass_active_warning">No rules apply to this app while it is skipping the firewall, and its connections will not appear in the traffic log.</string>
+    <string name="bypass_sms_hint">This is your messaging app. Picture messages often travel on a separate carrier connection that the firewall cannot carry, so skipping the firewall here is the usual fix for MMS.</string>
     <string name="shared_uid_summary">%1$s + %2$d more sharing this user ID</string>
 
     <string name="filter_all">All</string>

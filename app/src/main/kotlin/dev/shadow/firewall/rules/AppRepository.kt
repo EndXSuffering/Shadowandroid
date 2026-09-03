@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.os.Process
+import android.provider.Telephony
 import dev.shadow.firewall.core.UidNames
 import dev.shadow.firewall.vpn.AppIdentity
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,14 @@ data class InstalledApp(
 class AppRepository(context: Context) {
 
     private val packageManager: PackageManager = context.packageManager
+
+    /**
+     * The default SMS app, which is also the one that sends picture messages. MMS often rides
+     * a separate carrier APN that a userspace tunnel cannot reach, so this is the app most
+     * likely to need excluding.
+     */
+    val defaultSmsPackage: String? =
+        runCatching { Telephony.Sms.getDefaultSmsPackage(context) }.getOrNull()
     private val identityCache = HashMap<Int, AppIdentity>()
     private val iconCache = HashMap<String, Drawable?>()
 

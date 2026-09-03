@@ -171,6 +171,15 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Excludes an app from the tunnel entirely. Rebuilds the interface, so the VPN blips.
+     */
+    fun setBypassed(packageName: String, bypassed: Boolean) {
+        viewModelScope.launch { app.ruleStore.setBypassed(packageName, bypassed) }
+    }
+
+    val defaultSmsPackage: String? get() = app.appRepository.defaultSmsPackage
+
     fun blockDomain(hostname: String) {
         viewModelScope.launch { app.ruleStore.addBlockedDomain(hostname) }
     }

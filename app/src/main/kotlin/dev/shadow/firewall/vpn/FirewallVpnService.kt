@@ -51,8 +51,14 @@ class FirewallVpnService : VpnService() {
     /** Guards against a second start while the first is still loading rules from disk. */
     @Volatile private var starting = false
 
-    /** The IPv6 policy the current interface was built with; a change needs a new tunnel. */
-    private var establishedWithIpv6Blocked = false
+    /**
+     * The parts of the configuration that are baked into the interface at establish() time.
+     * Routes and the excluded-app set cannot be changed on a live tunnel, so a change here
+     * means tearing it down and building a new one.
+     */
+    private data class TunnelShape(val blockIpv6: Boolean, val bypassedPackages: Set<String>)
+
+    private var establishedShape = TunnelShape(false, emptySet())
 
     private val ruleEngine = RuleEngine()
 
@@ -103,7 +109,7 @@ class FirewallVpnService : VpnService() {
             val initial = app.ruleStore.settings.first()
             ruleEngine.rules = initial.rules
             ruleEngine.blocklists = app.blocklistRepository.index.value
-            establishedWithIpv6Blocked = initial.rules.blockIpv6
+            establishedShape = TunnelShape(initial.rules.blockIpv6, initial.rules.bypassedPackages)
 
             bringUp(app)
             starting = false
@@ -116,9 +122,9 @@ class FirewallVpnService : VpnService() {
             // Keep the engine's snapshot in step with what the user configures from here on.
             app.ruleStore.settings.collect { settings ->
                 ruleEngine.rules = settings.rules
-                if (settings.rules.blockIpv6 != establishedWithIpv6Blocked && tunnel != null) {
-                    // Routes are fixed at establish() time, so this one needs a new tunnel.
-                    establishedWithIpv6Blocked = settings.rules.blockIpv6
+                val shape = TunnelShape(settings.rules.blockIpv6, settings.rules.bypassedPackages)
+                if (shape != establishedShape && tunnel != null) {
+                    establishedShape = shape
                     tearDown()
                     bringUp(app)
                 }
@@ -193,6 +199,14 @@ class FirewallVpnService : VpnService() {
 
         // Our own sockets must not be filtered, or the relay would loop back into itself.
         runCatching { builder.addDisallowedApplication(packageName) }
+
+        // Apps the user has excluded. Their traffic never enters the tunnel, so nothing here
+        // filters or even sees it. An uninstalled package throws, which is not worth failing
+        // the whole tunnel over.
+        for (excluded in ruleEngine.rules.bypassedPackages) {
+            runCatching { builder.addDisallowedApplication(excluded) }
+                .onFailure { Log.w(TAG, "cannot exclude $excluded: ${it.message}") }
+        }
 
         builder.setConfigureIntent(
             PendingIntent.getActivity(

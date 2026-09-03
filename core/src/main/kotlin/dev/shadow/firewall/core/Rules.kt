@@ -38,7 +38,26 @@ data class RuleSet(
      * to cleartext where the domain rules can actually see them.
      */
     val blockEncryptedDns: Boolean = true,
+    /**
+     * Packages excluded from the tunnel altogether.
+     *
+     * Not a rule the engine evaluates: these apps are handed to
+     * `VpnService.Builder.addDisallowedApplication`, so their packets never reach the relay
+     * and behave exactly as they would with the firewall switched off. That is the only way
+     * to fix traffic a userspace tunnel cannot carry correctly — picture messaging rides a
+     * separate carrier APN that the relay's protected sockets cannot reach.
+     */
+    val bypassedPackages: Set<String> = emptySet(),
 ) {
+    fun withBypass(packageName: String, bypassed: Boolean): RuleSet {
+        val next = bypassedPackages.toMutableSet()
+        if (bypassed) next.add(packageName) else next.remove(packageName)
+        return copy(bypassedPackages = next)
+    }
+
+    fun isBypassed(packageName: String?): Boolean =
+        packageName != null && packageName in bypassedPackages
+
     fun withAppRule(rule: AppRule): RuleSet {
         val next = appRules.toMutableMap()
         if (rule.isDefault) next.remove(rule.uid) else next[rule.uid] = rule

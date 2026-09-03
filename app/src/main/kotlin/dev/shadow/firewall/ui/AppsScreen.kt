@@ -1,6 +1,7 @@
 package dev.shadow.firewall.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +30,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +64,8 @@ fun AppsScreen(
     val query by viewModel.appQuery.collectAsStateWithLifecycle()
     val showSystem by viewModel.showSystemApps.collectAsStateWithLifecycle()
     val loading by viewModel.loadingApps.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    var detail by remember { mutableStateOf<AppListItem?>(null) }
 
     Column(modifier.fillMaxSize()) {
         StatusHeader(vpnRunning = vpnRunning, onStart = onStart, onStop = onStop)
@@ -109,13 +114,91 @@ fun AppsScreen(
                 AppRow(
                     item = item,
                     icon = viewModel.iconFor(item.app.primaryPackage),
+                    bypassed = item.app.packageNames.any(settings.rules::isBypassed),
                     onToggle = { network, blocked ->
                         viewModel.toggleBlock(item.app.uid, network, blocked)
                     },
+                    onOpen = { detail = item },
                 )
             }
         }
     }
+
+    detail?.let { item ->
+        AppDetailDialog(
+            item = item,
+            bypassed = item.app.packageNames.any(settings.rules::isBypassed),
+            isDefaultSmsApp = viewModel.defaultSmsPackage in item.app.packageNames,
+            onBypass = { bypass ->
+                // A uid can cover several packages; exclude every one of them or the app
+                // keeps a route into the tunnel through whichever was left behind.
+                item.app.packageNames.forEach { viewModel.setBypassed(it, bypass) }
+            },
+            onDismiss = { detail = null },
+        )
+    }
+}
+
+/**
+ * Explains what excluding an app means before the user does it. Bypass is a subtle idea —
+ * the app is neither blocked nor filtered nor logged, it simply stops being visible — and a
+ * switch on the list row would give no room to say so.
+ */
+@Composable
+private fun AppDetailDialog(
+    item: AppListItem,
+    bypassed: Boolean,
+    isDefaultSmsApp: Boolean,
+    onBypass: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(item.app.label) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = item.app.packageNames.joinToString("\n"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (isDefaultSmsApp) {
+                    Text(
+                        text = stringResource(R.string.bypass_sms_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.bypass_title),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            stringResource(R.string.bypass_summary),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(checked = bypassed, onCheckedChange = onBypass)
+                }
+                if (bypassed) {
+                    Text(
+                        stringResource(R.string.bypass_active_warning),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+    )
 }
 
 @Composable
@@ -153,9 +236,11 @@ private fun StatusHeader(vpnRunning: Boolean, onStart: () -> Unit, onStop: () ->
 private fun AppRow(
     item: AppListItem,
     icon: android.graphics.drawable.Drawable?,
+    bypassed: Boolean,
     onToggle: (NetworkType, Boolean) -> Unit,
+    onOpen: () -> Unit,
 ) {
-    ElevatedCard(Modifier.fillMaxWidth()) {
+    ElevatedCard(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -185,6 +270,16 @@ private fun AppRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+
+            if (bypassed) {
+                // A bypassed app is outside the tunnel, so the block switches cannot apply.
+                Text(
+                    text = stringResource(R.string.bypass_badge),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                return@Row
             }
 
             BlockToggle(

@@ -222,6 +222,31 @@ class RuleEngineTest {
         assertFalse(EncryptedDns.isEncryptedTransportPort(53))
     }
 
+    // ------------------------------------------- tunnel bypass
+
+    @Test
+    fun `bypass is recorded per package and can be removed`() {
+        val rules = RuleSet().withBypass("com.example.messages", true)
+        assertTrue(rules.isBypassed("com.example.messages"))
+        assertFalse(rules.isBypassed("com.example.other"))
+        assertFalse(rules.isBypassed(null))
+
+        assertTrue(rules.withBypass("com.example.messages", false).bypassedPackages.isEmpty())
+    }
+
+    @Test
+    fun `bypass is not a verdict the engine reaches`() {
+        // A bypassed app is excluded at the interface, so its packets never arrive. The
+        // engine must not start second-guessing that, or a package could end up both
+        // outside the tunnel and blocked inside it.
+        val rules = RuleSet().withBypass("com.example.messages", true)
+            .withAppRule(AppRule(gameUid, blockWifi = true, blockMobile = true))
+        val subject = engine(rules)
+
+        assertEquals(Verdict.BLOCK, subject.decide(gameUid, NetworkType.WIFI, null, false).verdict)
+        assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, null, false).verdict)
+    }
+
     // ------------------------------------ subscribed allowlists
 
     private fun engineWithAllowlist(): RuleEngine {

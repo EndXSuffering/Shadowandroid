@@ -165,9 +165,12 @@ Worth knowing before you rely on it:
   with hard-coded provider addresses still gets through.
 - **Blocklists are third-party data.** They are maintained by other people and occasionally
   block something you wanted. The allowed-domains list overrides any of them.
-- **MMS may not work while the tunnel is up.** Picture messages are often carried on a separate
-  carrier APN that a VPN cannot reach, which is a routing problem rather than a blocking one.
-  Ordinary SMS is unaffected: it travels on the cellular control channel and never touches IP.
+- **MMS may need the messaging app to skip the firewall.** Picture messages are often carried
+  on a separate carrier APN that a userspace tunnel cannot reach — a routing problem rather
+  than a blocking one, so no rule change fixes it. Tap the app in the list and turn on *Skip
+  the firewall*; its traffic then bypasses the tunnel entirely. The default messaging app is
+  flagged in that dialog for exactly this reason. Ordinary SMS is unaffected either way: it
+  travels on the cellular control channel and never touches IP.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN.
 - **ICMP is dropped**, so `ping` will not work while the tunnel is up. Relaying it needs a raw
   socket, which a non-rooted app cannot open.
