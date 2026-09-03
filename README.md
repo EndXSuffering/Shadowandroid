@@ -10,8 +10,10 @@ want. No root required.
 - **Block per app** — separate Wi-Fi and mobile-data switches for each installed app.
 - **Block per domain** — a suffix-matched blocklist (`doubleclick.net` also covers
   `ad.doubleclick.net`), with an allowlist that overrides it.
-- **Subscribed ad and malware lists** — curated third-party lists that refresh in the
-  background, on by default. Roughly 370,000 domains out of the box.
+- **Subscribed ad, tracker and malware lists** — curated third-party lists that refresh in
+  the background, on by default.
+- **Two tracker levels** — *Balanced* blocks telemetry without breaking apps; *Full* goes
+  after attribution and measurement too.
 - **Block by default** — optional deny-everything-unless-allowed policy.
 
 👉 **Just want it on your phone? Go to [Installing](#installing).**
@@ -113,6 +115,40 @@ path rule would take down the site. In practice this drops well under 1% of a ty
 
 Every list can be switched off individually, the whole feature has a master switch, and
 refreshes can be limited to Wi‑Fi or set to manual only.
+
+## Tracker blocking
+
+Two levels, and they are not the same list turned up louder — they are different kinds of
+endpoint.
+
+**Balanced** blocks analytics and phone-maker telemetry: the requests an app fires and never
+reads a reply to. Losing them is not something an app notices. This is Samsung, Xiaomi, OPPO,
+Realme and Vivo reporting, plus ShadowWhisperer's tracking list and Peter Lowe's.
+
+**Full** adds attribution, measurement and consent services. Some apps genuinely wait on these
+before they will show content, so this level will occasionally cost you an app until you allow
+a domain by hand.
+
+Both levels also subscribe to a **referral allowlist** — around 900 exceptions covering the
+redirectors behind shopping, coupon and affiliate links, which broad tracker lists are
+notorious for breaking. It is the piece that makes "does not break apps" mean something: its
+entries override *every* other list, not just its own, so a tracker list and a working
+checkout flow can coexist.
+
+## What this does not do
+
+It does not make you anonymous. A local firewall changes which servers your device talks to,
+and nothing else:
+
+- Your ISP or mobile carrier still sees every destination you connect to.
+- Every site you visit still sees your real IP address.
+- Browser fingerprinting — screen size, fonts, timezone, canvas — is untouched, and is how
+  most commercial tracking actually identifies you.
+- Anything you are signed in to knows exactly who you are regardless.
+
+Blocking trackers reduces how much gets collected about you and by whom. That is worth doing,
+and it is a different thing from anonymity. If you need to hide *where you are connecting
+from*, that requires a real remote VPN or Tor, neither of which this app is.
 
 ## Limitations
 

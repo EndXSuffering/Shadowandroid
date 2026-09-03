@@ -1,7 +1,26 @@
 package dev.shadow.firewall.rules
 
 /** Broad grouping shown in the UI. */
-enum class BlocklistCategory { ADS, MALWARE }
+enum class BlocklistCategory { ADS, TRACKING, MALWARE }
+
+/**
+ * How hard to go after trackers.
+ *
+ * The two levels are not a slider on the same list; they are different kinds of list. The
+ * balanced set is telemetry an app can lose without noticing — vendor analytics endpoints
+ * that are fire-and-forget. The strict set adds attribution, measurement and consent
+ * endpoints, which some apps genuinely wait on, so it can break things.
+ */
+enum class TrackerProtection {
+    /** No tracker lists at all. */
+    OFF,
+
+    /** Telemetry that apps discard the result of. Safe to leave on. */
+    BALANCED,
+
+    /** Everything, including endpoints apps sometimes depend on. Expect occasional breakage. */
+    STRICT,
+}
 
 /**
  * A list the app knows how to subscribe to.
@@ -18,6 +37,10 @@ data class BlocklistSource(
     val category: BlocklistCategory,
     val enabledByDefault: Boolean,
     val approximateEntries: Int,
+    /** The lowest tracker level at which this list switches on; null for non-tracker lists. */
+    val trackerTier: TrackerProtection? = null,
+    /** A list of exceptions rather than blocks; its entries override every other list. */
+    val isAllowlist: Boolean = false,
 ) {
     /** Lists big enough that the user should be warned before switching them on. */
     val isHeavy: Boolean get() = approximateEntries > 500_000
@@ -68,6 +91,97 @@ object BlocklistCatalog {
             enabledByDefault = false,
             approximateEntries = 98_000,
         ),
+        // --- trackers, balanced: vendor telemetry an app never checks the result of ---
+        BlocklistSource(
+            id = "tracking_shadowwhisperer",
+            title = "ShadowWhisperer tracking list",
+            description = "Analytics and telemetry endpoints. Apps discard these responses, " +
+                "so losing them is not something they notice.",
+            url = "$REGISTRY/filter_69.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 115_000,
+            trackerTier = TrackerProtection.BALANCED,
+        ),
+        BlocklistSource(
+            id = "tracking_peter_lowe",
+            title = "Peter Lowe's list",
+            description = "Small, long-maintained and conservative. Rarely the cause of a " +
+                "broken app.",
+            url = "$REGISTRY/filter_3.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 3_500,
+            trackerTier = TrackerProtection.BALANCED,
+        ),
+        BlocklistSource(
+            id = "tracking_oem_samsung",
+            title = "Samsung telemetry",
+            description = "Samsung and One UI reporting endpoints.",
+            url = "$REGISTRY/filter_61.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 200,
+            trackerTier = TrackerProtection.BALANCED,
+        ),
+        BlocklistSource(
+            id = "tracking_oem_xiaomi",
+            title = "Xiaomi telemetry",
+            description = "Xiaomi and MIUI reporting endpoints.",
+            url = "$REGISTRY/filter_60.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 350,
+            trackerTier = TrackerProtection.BALANCED,
+        ),
+        BlocklistSource(
+            id = "tracking_oem_oppo",
+            title = "OPPO and Realme telemetry",
+            description = "ColorOS reporting endpoints.",
+            url = "$REGISTRY/filter_66.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 500,
+            trackerTier = TrackerProtection.BALANCED,
+        ),
+        BlocklistSource(
+            id = "tracking_oem_vivo",
+            title = "Vivo telemetry",
+            description = "Funtouch OS reporting endpoints.",
+            url = "$REGISTRY/filter_65.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 230,
+            trackerTier = TrackerProtection.BALANCED,
+        ),
+
+        // --- trackers, strict: broad, and known to cost you the occasional app ---
+        BlocklistSource(
+            id = "tracking_hagezi_pro_plus",
+            title = "HaGeZi Pro++",
+            description = "Aggressive. Adds attribution, measurement and consent endpoints " +
+                "that some apps wait on before they will load.",
+            url = "$REGISTRY/filter_51.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = false,
+            approximateEntries = 250_000,
+            trackerTier = TrackerProtection.STRICT,
+        ),
+
+        // --- the counterweight: exceptions that apply across every other list ---
+        BlocklistSource(
+            id = "allowlist_referral",
+            title = "Referral and shopping exceptions",
+            description = "Un-blocks the redirectors behind shopping, coupon and referral " +
+                "links, which broad tracker lists otherwise break. Overrides every list.",
+            url = "$REGISTRY/filter_45.txt",
+            category = BlocklistCategory.TRACKING,
+            enabledByDefault = true,
+            approximateEntries = 900,
+            trackerTier = TrackerProtection.BALANCED,
+            isAllowlist = true,
+        ),
+
         BlocklistSource(
             id = "phishing_army",
             title = "Phishing Army",
@@ -120,6 +234,29 @@ object BlocklistCatalog {
 
     val defaultEnabledIds: Set<String> =
         sources.filter { it.enabledByDefault }.map { it.id }.toSet()
+
+    /** Every list that belongs to the tracker feature, at any level. */
+    val trackerSources: List<BlocklistSource> = sources.filter { it.trackerTier != null }
+
+    /** The tracker lists that should be on at [level]. */
+    fun trackerIdsFor(level: TrackerProtection): Set<String> = when (level) {
+        TrackerProtection.OFF -> emptySet()
+        TrackerProtection.BALANCED ->
+            trackerSources.filter { it.trackerTier == TrackerProtection.BALANCED }
+                .map { it.id }.toSet()
+        // Strict is additive: it keeps the balanced set and adds the aggressive lists.
+        TrackerProtection.STRICT -> trackerSources.map { it.id }.toSet()
+    }
+
+    /**
+     * Reads a level back from the enabled set, so the UI can show what is actually on rather
+     * than what was last tapped. Returns null when the user has hand-picked a combination
+     * that is not one of the levels.
+     */
+    fun trackerLevelOf(enabledIds: Set<String>): TrackerProtection? {
+        val enabledTrackers = trackerSources.map { it.id }.filter { it in enabledIds }.toSet()
+        return TrackerProtection.entries.firstOrNull { trackerIdsFor(it) == enabledTrackers }
+    }
 }
 
 /** How often the background refresh runs. */

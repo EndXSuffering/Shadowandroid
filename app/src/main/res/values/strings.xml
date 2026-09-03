@@ -65,7 +65,16 @@
     <string name="setting_use_blocklists">Use subscribed lists</string>
     <string name="blocklist_total">%1$s domains and addresses loaded</string>
     <string name="blocklist_total_empty">Nothing downloaded yet</string>
-    <string name="blocklist_category_ads">Ads and tracking</string>
+    <string name="blocklist_category_ads">Ads</string>
+    <string name="blocklist_category_tracking">Trackers and telemetry</string>
+    <string name="tracker_level">Tracker blocking</string>
+    <string name="tracker_level_summary">How far to go after the services that profile you across apps and sites.</string>
+    <string name="tracker_off">Off</string>
+    <string name="tracker_balanced">Balanced</string>
+    <string name="tracker_strict">Full</string>
+    <string name="tracker_off_detail">No tracker lists. Ad and malware lists are unaffected.</string>
+    <string name="tracker_balanced_detail">Blocks analytics and phone-maker telemetry — the kind apps send and never read a reply to. Shopping and referral links stay working. This should not break anything.</string>
+    <string name="tracker_strict_detail">Also blocks attribution, measurement and consent services. Some apps wait on these before they will load, so expect to allow the occasional domain by hand.</string>
     <string name="blocklist_category_malware">Malware, phishing and scams</string>
     <string name="blocklist_entry_summary">%1$s entries · updated %2$s</string>
     <string name="blocklist_not_downloaded">Not downloaded yet</string>

@@ -233,7 +233,11 @@ class BlocklistRepository(
             throw IOException("could not replace the index for ${source.id}")
         }
 
-        return blockedSet.size to addressSet.size
+        return if (source.isAllowlist) {
+            allowedSet.size to 0
+        } else {
+            blockedSet.size to addressSet.size
+        }
     }
 
     private fun readIndex(source: BlocklistSource, file: File): Blocklist =
@@ -244,6 +248,7 @@ class BlocklistRepository(
                 blocked = DomainHashSet.readFrom(input),
                 allowed = DomainHashSet.readFrom(input),
                 blockedAddresses = DomainHashSet.readFrom(input),
+                isAllowlist = source.isAllowlist,
             )
         }
 

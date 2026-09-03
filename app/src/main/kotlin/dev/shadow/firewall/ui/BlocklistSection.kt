@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import dev.shadow.firewall.R
 import dev.shadow.firewall.rules.BlocklistCategory
 import dev.shadow.firewall.rules.BlocklistStatus
+import dev.shadow.firewall.rules.TrackerProtection
 import dev.shadow.firewall.rules.UpdateFrequency
 import java.text.DateFormat
 import java.util.Date
@@ -43,6 +44,8 @@ fun BlocklistSection(
     unmeteredOnly: Boolean,
     refreshing: Boolean,
     totalEntries: Int,
+    trackerProtection: TrackerProtection,
+    onTrackerProtection: (TrackerProtection) -> Unit,
     onUseBlocklists: (Boolean) -> Unit,
     onToggleList: (String, Boolean) -> Unit,
     onFrequency: (UpdateFrequency) -> Unit,
@@ -75,6 +78,34 @@ fun BlocklistSection(
 
             HorizontalDivider()
 
+            Text(stringResource(R.string.tracker_level), style = MaterialTheme.typography.labelLarge)
+            Text(
+                stringResource(R.string.tracker_level_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (level in TrackerProtection.entries) {
+                    FilterChip(
+                        selected = trackerProtection == level,
+                        onClick = { onTrackerProtection(level) },
+                        enabled = useBlocklists,
+                        label = { Text(stringResource(trackerLevelLabel(level))) },
+                    )
+                }
+            }
+            Text(
+                text = stringResource(trackerLevelDetail(trackerProtection)),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (trackerProtection == TrackerProtection.STRICT) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+
+            HorizontalDivider()
+
             for (category in BlocklistCategory.entries) {
                 val inCategory = statuses.filter { it.source.category == category }
                 if (inCategory.isEmpty()) continue
@@ -82,6 +113,7 @@ fun BlocklistSection(
                     text = stringResource(
                         when (category) {
                             BlocklistCategory.ADS -> R.string.blocklist_category_ads
+                            BlocklistCategory.TRACKING -> R.string.blocklist_category_tracking
                             BlocklistCategory.MALWARE -> R.string.blocklist_category_malware
                         },
                     ),
@@ -203,6 +235,18 @@ private fun BlocklistRow(
         Spacer(Modifier.width(12.dp))
         Switch(checked = status.enabled, onCheckedChange = onToggle, enabled = enabled)
     }
+}
+
+private fun trackerLevelLabel(level: TrackerProtection): Int = when (level) {
+    TrackerProtection.OFF -> R.string.tracker_off
+    TrackerProtection.BALANCED -> R.string.tracker_balanced
+    TrackerProtection.STRICT -> R.string.tracker_strict
+}
+
+private fun trackerLevelDetail(level: TrackerProtection): Int = when (level) {
+    TrackerProtection.OFF -> R.string.tracker_off_detail
+    TrackerProtection.BALANCED -> R.string.tracker_balanced_detail
+    TrackerProtection.STRICT -> R.string.tracker_strict_detail
 }
 
 private fun frequencyLabel(frequency: UpdateFrequency): Int = when (frequency) {

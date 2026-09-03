@@ -35,6 +35,7 @@ private data class StoredRules(
     /** Null means "never configured", which is how the defaults get applied exactly once. */
     val enabledBlocklists: List<String>? = null,
     val updateFrequency: String = UpdateFrequency.DAILY.name,
+    val trackerProtection: String = TrackerProtection.BALANCED.name,
     val updateOnUnmeteredOnly: Boolean = true,
     val blocklistMetadata: Map<String, BlocklistMetadata> = emptyMap(),
 )
@@ -72,6 +73,7 @@ data class FirewallSettings(
     val enabledBlocklists: Set<String> = BlocklistCatalog.defaultEnabledIds,
     val updateFrequency: UpdateFrequency = UpdateFrequency.DAILY,
     val updateOnUnmeteredOnly: Boolean = true,
+    val trackerProtection: TrackerProtection = TrackerProtection.BALANCED,
 )
 
 /**
@@ -117,6 +119,9 @@ class RuleStore(private val context: Context) {
 
     private fun parseFrequency(name: String): UpdateFrequency =
         runCatching { UpdateFrequency.valueOf(name) }.getOrDefault(UpdateFrequency.DAILY)
+
+    private fun parseTrackerProtection(name: String): TrackerProtection =
+        runCatching { TrackerProtection.valueOf(name) }.getOrDefault(TrackerProtection.BALANCED)
 
     suspend fun setAppRule(rule: AppRule) = update { it.copy(rules = it.rules.withAppRule(rule)) }
 
@@ -169,6 +174,19 @@ class RuleStore(private val context: Context) {
 
     suspend fun setUpdateFrequency(frequency: UpdateFrequency) =
         update { it.copy(updateFrequency = frequency) }
+
+    /**
+     * Applies a tracker level, which is a shorthand for a particular set of lists. Lists
+     * outside the tracker feature are left exactly as the user set them.
+     */
+    suspend fun setTrackerProtection(level: TrackerProtection) = update { settings ->
+        val trackerIds = BlocklistCatalog.trackerSources.map { it.id }.toSet()
+        val wanted = BlocklistCatalog.trackerIdsFor(level)
+        settings.copy(
+            trackerProtection = level,
+            enabledBlocklists = settings.enabledBlocklists - trackerIds + wanted,
+        )
+    }
 
     suspend fun setUpdateOnUnmeteredOnly(enabled: Boolean) =
         update { it.copy(updateOnUnmeteredOnly = enabled) }
@@ -245,6 +263,7 @@ class RuleStore(private val context: Context) {
         enabledBlocklists = enabledBlocklists?.toSet() ?: BlocklistCatalog.defaultEnabledIds,
         updateFrequency = parseFrequency(updateFrequency),
         updateOnUnmeteredOnly = updateOnUnmeteredOnly,
+        trackerProtection = parseTrackerProtection(trackerProtection),
     )
 
     private fun FirewallSettings.toStored() = StoredRules(
@@ -255,6 +274,7 @@ class RuleStore(private val context: Context) {
         enabledBlocklists = enabledBlocklists.toList().sorted(),
         updateFrequency = updateFrequency.name,
         updateOnUnmeteredOnly = updateOnUnmeteredOnly,
+        trackerProtection = trackerProtection.name,
         apps = rules.appRules.values.map { StoredAppRule(it.uid, it.blockWifi, it.blockMobile) },
         allowedUids = rules.allowedUids.toList(),
         blockedDomains = rules.blockedDomains.toList().sorted(),

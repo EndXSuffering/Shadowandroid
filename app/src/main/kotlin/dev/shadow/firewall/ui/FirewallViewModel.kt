@@ -12,6 +12,7 @@ import dev.shadow.firewall.rules.BlocklistStatus
 import dev.shadow.firewall.rules.BlocklistWorker
 import dev.shadow.firewall.rules.FirewallSettings
 import dev.shadow.firewall.rules.InstalledApp
+import dev.shadow.firewall.rules.TrackerProtection
 import dev.shadow.firewall.rules.UpdateFrequency
 import dev.shadow.firewall.vpn.FirewallVpnService
 import dev.shadow.firewall.vpn.VpnState
@@ -98,6 +99,15 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
             // Switching a list on should fetch it now rather than at the next scheduled run;
             // switching one off should free its cache immediately.
             if (enabled) app.blocklistRepository.refresh() else app.blocklistRepository.forget(id)
+        }
+    }
+
+    fun setTrackerProtection(level: TrackerProtection) {
+        viewModelScope.launch {
+            app.ruleStore.setTrackerProtection(level)
+            // Switching level enables lists that have never been downloaded, so fetch now
+            // rather than leaving the user with a level that does nothing until tomorrow.
+            app.blocklistRepository.refresh()
         }
     }
 

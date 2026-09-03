@@ -222,6 +222,51 @@ class RuleEngineTest {
         assertFalse(EncryptedDns.isEncryptedTransportPort(53))
     }
 
+    // ------------------------------------ subscribed allowlists
+
+    private fun engineWithAllowlist(): RuleEngine {
+        val trackers = Blocklist(
+            id = "trackers",
+            title = "Aggressive tracker list",
+            blocked = DomainHashSet.build(listOf("go.redirectingat.com", "tracker.example.org")),
+        )
+        // A referral allowlist ships as @@ exceptions and must override every other list,
+        // not just its own entries — that is what keeps shopping links working under a
+        // broad tracker list.
+        val referral = Blocklist(
+            id = "referral",
+            title = "Referral exceptions",
+            blocked = DomainHashSet.EMPTY,
+            allowed = DomainHashSet.build(listOf("go.redirectingat.com")),
+            isAllowlist = true,
+        )
+        return RuleEngine().apply { blocklists = BlocklistIndex(listOf(trackers, referral)) }
+    }
+
+    @Test
+    fun `a subscribed allowlist overrides a different list's block`() {
+        assertEquals(Verdict.ALLOW, engineWithAllowlist().decideHostname("go.redirectingat.com").verdict)
+    }
+
+    @Test
+    fun `the allowlist does not exempt everything else on that list`() {
+        assertEquals(Verdict.BLOCK, engineWithAllowlist().decideHostname("tracker.example.org").verdict)
+    }
+
+    @Test
+    fun `an allowlist covers subdomains of its entries`() {
+        assertEquals(Verdict.ALLOW, engineWithAllowlist().decideHostname("a.go.redirectingat.com").verdict)
+    }
+
+    @Test
+    fun `an allowlist contributes its exceptions rather than its blocks to the total`() {
+        val index = engineWithAllowlist().blocklists
+        // Two blocked domains plus one exception.
+        assertEquals(3, index.totalEntries)
+        assertTrue(index.isExempt("go.redirectingat.com"))
+        assertFalse(index.isExempt("tracker.example.org"))
+    }
+
     // -------------------------------- shared-address regressions
 
     @Test
