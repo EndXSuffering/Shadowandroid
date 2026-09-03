@@ -15,6 +15,8 @@ import androidx.core.app.NotificationCompat
 import dev.shadow.firewall.FirewallApp
 import dev.shadow.firewall.R
 import dev.shadow.firewall.core.RuleEngine
+import dev.shadow.firewall.core.RuleSet
+import dev.shadow.firewall.core.Tor
 import dev.shadow.firewall.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -56,9 +58,14 @@ class FirewallVpnService : VpnService() {
      * Routes and the excluded-app set cannot be changed on a live tunnel, so a change here
      * means tearing it down and building a new one.
      */
-    private data class TunnelShape(val blockIpv6: Boolean, val bypassedPackages: Set<String>)
+    private data class TunnelShape(
+        val blockIpv6: Boolean,
+        val bypassedPackages: Set<String>,
+        /** Orbot is excluded only while something is routed through it. */
+        val usesTor: Boolean,
+    )
 
-    private var establishedShape = TunnelShape(false, emptySet())
+    private var establishedShape = TunnelShape(false, emptySet(), false)
 
     private val ruleEngine = RuleEngine()
 
@@ -108,8 +115,9 @@ class FirewallVpnService : VpnService() {
             // which routes the interface gets, so it cannot be applied afterwards.
             val initial = app.ruleStore.settings.first()
             ruleEngine.rules = initial.rules
+            ruleEngine.torUids = app.appRepository.uidsFor(initial.rules.torPackages)
             ruleEngine.blocklists = app.blocklistRepository.index.value
-            establishedShape = TunnelShape(initial.rules.blockIpv6, initial.rules.bypassedPackages)
+            establishedShape = shapeOf(initial.rules)
 
             bringUp(app)
             starting = false
@@ -122,7 +130,10 @@ class FirewallVpnService : VpnService() {
             // Keep the engine's snapshot in step with what the user configures from here on.
             app.ruleStore.settings.collect { settings ->
                 ruleEngine.rules = settings.rules
-                val shape = TunnelShape(settings.rules.blockIpv6, settings.rules.bypassedPackages)
+                // Routing is stored by package but enforced by uid, so re-resolve on every
+                // change: an app reinstalled while the tunnel is up comes back with a new uid.
+                ruleEngine.torUids = app.appRepository.uidsFor(settings.rules.torPackages)
+                val shape = shapeOf(settings.rules)
                 if (shape != establishedShape && tunnel != null) {
                     establishedShape = shape
                     tearDown()
@@ -131,6 +142,12 @@ class FirewallVpnService : VpnService() {
             }
         }
     }
+
+    private fun shapeOf(rules: RuleSet) = TunnelShape(
+        blockIpv6 = rules.blockIpv6,
+        bypassedPackages = rules.bypassedPackages,
+        usesTor = rules.usesTor,
+    )
 
     private fun bringUp(app: FirewallApp) {
         val monitor = NetworkMonitor(this).also { it.start(); networkMonitor = it }
@@ -206,6 +223,14 @@ class FirewallVpnService : VpnService() {
         for (excluded in ruleEngine.rules.bypassedPackages) {
             runCatching { builder.addDisallowedApplication(excluded) }
                 .onFailure { Log.w(TAG, "cannot exclude $excluded: ${it.message}") }
+        }
+
+        // Orbot carries the routed traffic, so it has to reach the network from outside the
+        // tunnel. Leaving it inside would send every Tor connection back through the relay
+        // that produced it, and any rule that blocked Orbot would silently break routing.
+        if (ruleEngine.rules.usesTor) {
+            runCatching { builder.addDisallowedApplication(Tor.ORBOT_PACKAGE) }
+                .onFailure { Log.w(TAG, "Orbot is not installed: ${it.message}") }
         }
 
         builder.setConfigureIntent(

@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.SignalCellularAlt
@@ -23,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -45,6 +48,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.shadow.firewall.R
 import dev.shadow.firewall.core.NetworkType
+import dev.shadow.firewall.rules.TorAvailability
 
 /**
  * The per-app rule list: one row per uid, with a Wi-Fi and a mobile-data toggle.
@@ -65,6 +69,7 @@ fun AppsScreen(
     val showSystem by viewModel.showSystemApps.collectAsStateWithLifecycle()
     val loading by viewModel.loadingApps.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val torAvailability by viewModel.torAvailability.collectAsStateWithLifecycle()
     var detail by remember { mutableStateOf<AppListItem?>(null) }
 
     Column(modifier.fillMaxSize()) {
@@ -115,10 +120,14 @@ fun AppsScreen(
                     item = item,
                     icon = viewModel.iconFor(item.app.primaryPackage),
                     bypassed = item.app.packageNames.any(settings.rules::isBypassed),
+                    torRouted = item.app.packageNames.any(settings.rules::isTorRouted),
                     onToggle = { network, blocked ->
                         viewModel.toggleBlock(item.app.uid, network, blocked)
                     },
-                    onOpen = { detail = item },
+                    onOpen = {
+                        detail = item
+                        viewModel.checkTor()
+                    },
                 )
             }
         }
@@ -128,12 +137,18 @@ fun AppsScreen(
         AppDetailDialog(
             item = item,
             bypassed = item.app.packageNames.any(settings.rules::isBypassed),
+            torRouted = item.app.packageNames.any(settings.rules::isTorRouted),
+            torAvailability = torAvailability,
             isDefaultSmsApp = viewModel.defaultSmsPackage in item.app.packageNames,
             onBypass = { bypass ->
                 // A uid can cover several packages; exclude every one of them or the app
                 // keeps a route into the tunnel through whichever was left behind.
                 item.app.packageNames.forEach { viewModel.setBypassed(it, bypass) }
             },
+            onTorRouted = { routed ->
+                item.app.packageNames.forEach { viewModel.setTorRouted(it, routed) }
+            },
+            onOpenOrbot = viewModel::openOrbot,
             onDismiss = { detail = null },
         )
     }
@@ -148,15 +163,22 @@ fun AppsScreen(
 private fun AppDetailDialog(
     item: AppListItem,
     bypassed: Boolean,
+    torRouted: Boolean,
+    torAvailability: TorAvailability,
     isDefaultSmsApp: Boolean,
     onBypass: (Boolean) -> Unit,
+    onTorRouted: (Boolean) -> Unit,
+    onOpenOrbot: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(item.app.label) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
                 Text(
                     text = item.app.packageNames.joinToString("\n"),
                     style = MaterialTheme.typography.bodySmall,
@@ -169,21 +191,27 @@ private fun AppDetailDialog(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.bypass_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            stringResource(R.string.bypass_summary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Switch(checked = bypassed, onCheckedChange = onBypass)
-                }
+
+                SwitchRow(
+                    title = stringResource(R.string.tor_title),
+                    summary = stringResource(R.string.tor_summary),
+                    checked = torRouted,
+                    onCheckedChange = onTorRouted,
+                )
+                TorNotice(
+                    routed = torRouted,
+                    availability = torAvailability,
+                    onOpenOrbot = onOpenOrbot,
+                )
+
+                HorizontalDivider()
+
+                SwitchRow(
+                    title = stringResource(R.string.bypass_title),
+                    summary = stringResource(R.string.bypass_summary),
+                    checked = bypassed,
+                    onCheckedChange = onBypass,
+                )
                 if (bypassed) {
                     Text(
                         stringResource(R.string.bypass_active_warning),
@@ -199,6 +227,87 @@ private fun AppDetailDialog(
             }
         },
     )
+}
+
+@Composable
+private fun SwitchRow(
+    title: String,
+    summary: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * What Tor routing will and will not do for this app, plus whether Orbot is in a state to
+ * carry it. Both halves matter: a routed app with Orbot stopped simply has no network, and a
+ * routed app with Orbot running is still not anonymous, which is the more common misreading.
+ */
+@Composable
+private fun TorNotice(
+    routed: Boolean,
+    availability: TorAvailability,
+    onOpenOrbot: () -> Unit,
+) {
+    if (!routed) {
+        Text(
+            stringResource(R.string.tor_explainer),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    Text(
+        stringResource(R.string.tor_limits),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    when (availability) {
+        TorAvailability.READY -> Text(
+            stringResource(R.string.tor_orbot_ready),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        TorAvailability.UNKNOWN -> Unit
+        TorAvailability.NOT_INSTALLED, TorAvailability.NOT_RUNNING -> {
+            Text(
+                stringResource(
+                    if (availability == TorAvailability.NOT_INSTALLED) {
+                        R.string.tor_orbot_missing
+                    } else {
+                        R.string.tor_orbot_stopped
+                    },
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            androidx.compose.material3.TextButton(onClick = onOpenOrbot) {
+                Text(
+                    stringResource(
+                        if (availability == TorAvailability.NOT_INSTALLED) {
+                            R.string.action_install_orbot
+                        } else {
+                            R.string.action_open_orbot
+                        },
+                    ),
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -237,6 +346,7 @@ private fun AppRow(
     item: AppListItem,
     icon: android.graphics.drawable.Drawable?,
     bypassed: Boolean,
+    torRouted: Boolean,
     onToggle: (NetworkType, Boolean) -> Unit,
     onOpen: () -> Unit,
 ) {
@@ -280,6 +390,15 @@ private fun AppRow(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 return@Row
+            }
+
+            if (torRouted) {
+                Text(
+                    text = stringResource(R.string.tor_badge),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(Modifier.width(8.dp))
             }
 
             BlockToggle(

@@ -12,6 +12,7 @@ import dev.shadow.firewall.rules.BlocklistStatus
 import dev.shadow.firewall.rules.BlocklistWorker
 import dev.shadow.firewall.rules.FirewallSettings
 import dev.shadow.firewall.rules.InstalledApp
+import dev.shadow.firewall.rules.TorAvailability
 import dev.shadow.firewall.rules.TrackerProtection
 import dev.shadow.firewall.rules.UpdateFrequency
 import dev.shadow.firewall.vpn.FirewallVpnService
@@ -179,6 +180,32 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
     }
 
     val defaultSmsPackage: String? get() = app.appRepository.defaultSmsPackage
+
+    // -------------------------------------------------------------- tor
+
+    private val _torAvailability = MutableStateFlow(TorAvailability.UNKNOWN)
+    val torAvailability: StateFlow<TorAvailability> = _torAvailability.asStateFlow()
+
+    /**
+     * Hands an app's connections to Tor. The first one rebuilds the interface, because Orbot
+     * itself has to be excluded from the tunnel before it can carry anything.
+     */
+    fun setTorRouted(packageName: String, routed: Boolean) {
+        viewModelScope.launch {
+            app.ruleStore.setTorRouted(packageName, routed)
+            if (routed) checkTor()
+        }
+    }
+
+    fun checkTor() {
+        viewModelScope.launch { _torAvailability.value = app.torGateway.check() }
+    }
+
+    /** Brings Orbot to the front, after asking it to start in case it is only installed. */
+    fun openOrbot() {
+        app.torGateway.requestStart()
+        app.torGateway.open()
+    }
 
     fun blockDomain(hostname: String) {
         viewModelScope.launch { app.ruleStore.addBlockedDomain(hostname) }

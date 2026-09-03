@@ -42,6 +42,13 @@ enum class BlockReason {
 
     /** Encrypted DNS refused so lookups fall back to a transport that can be filtered. */
     ENCRYPTED_DNS,
+
+    /**
+     * The app is routed through Tor and this flow is something Tor cannot carry. Tor is a TCP
+     * relay network, so UDP has nowhere to go; dropping it is the only honest answer, because
+     * sending it directly would leak around the very thing the user asked for.
+     */
+    TOR_UNSUPPORTED,
 }
 
 /** Identifies one transport flow inside the tunnel. */
@@ -73,6 +80,8 @@ data class ConnectionEvent(
     val reason: BlockReason,
     /** Which subscribed list matched, when the reason is [BlockReason.SUBSCRIBED_LIST]. */
     val ruleSource: String? = null,
+    /** True when the connection was handed to Tor rather than dialled directly. */
+    val viaTor: Boolean = false,
     val bytesOut: Long = 0,
     val bytesIn: Long = 0,
 ) {

@@ -113,6 +113,14 @@ class AppRepository(context: Context) {
         return AppIdentity(null, UidNames.describe(uid))
     }
 
+    /**
+     * The uids behind a set of package names, for rules that are stored by package but have to
+     * be enforced by uid. Packages that are no longer installed simply drop out.
+     */
+    fun uidsFor(packageNames: Set<String>): Set<Int> = packageNames.mapNotNullTo(HashSet()) { name ->
+        runCatching { packageManager.getApplicationInfo(name, 0).uid }.getOrNull()
+    }
+
     @Synchronized
     fun icon(packageName: String): Drawable? = iconCache.getOrPut(packageName) {
         runCatching { packageManager.getApplicationIcon(packageName) }.getOrNull()

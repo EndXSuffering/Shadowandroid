@@ -11,6 +11,9 @@ import java.net.InetAddress
  */
 object Dns {
 
+    /** The well-known port, where cleartext lookups can still be inspected. */
+    const val PORT = 53
+
     const val TYPE_A = 1
     const val TYPE_CNAME = 5
     const val TYPE_AAAA = 28

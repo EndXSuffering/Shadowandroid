@@ -14,6 +14,9 @@ want. No root required.
   the background, on by default.
 - **Two tracker levels** — *Balanced* blocks telemetry without breaking apps; *Full* goes
   after attribution and measurement too.
+- **Route an app through Tor** — hand one app's connections to Orbot, so the far end sees a
+  Tor exit address instead of yours. Fails closed: nothing goes out directly if Tor cannot
+  carry it.
 - **Block by default** — optional deny-everything-unless-allowed policy.
 
 👉 **Just want it on your phone? Go to [Installing](#installing).**
@@ -135,20 +138,55 @@ notorious for breaking. It is the piece that makes "does not break apps" mean so
 entries override *every* other list, not just its own, so a tracker list and a working
 checkout flow can coexist.
 
+## Routing an app through Tor
+
+Tap any app and turn on **Route through Tor**. Its TCP connections are then handed to
+[Orbot](https://play.google.com/store/apps/details?id=org.torproject.android) — the Tor
+Project's own Android app — over the SOCKS proxy Orbot listens on, so the servers it reaches
+see a Tor exit address instead of yours.
+
+There is no Tor client inside this app and there is not going to be one. Shipping a
+reimplementation of Tor, or a bundled copy nobody updates, is how people end up trusting
+something weaker than they think. Orbot has to be installed and running; the dialog probes the
+proxy and tells you which of those is missing.
+
+**What routing actually gets you.** The site at the other end no longer sees your address.
+That is the whole of it. It is not anonymity:
+
+- Your phone still resolves names the ordinary way, so your network and your DNS provider
+  still see which sites the app is visiting. Android's Private DNS setting closes the
+  local-network half of that; nothing here closes all of it.
+- The app can still identify you perfectly well by the account you are signed in to.
+- Tor is measurably slower, and a fair number of services challenge or refuse traffic arriving
+  from an exit node.
+
+**What is dropped rather than leaked.** Tor relays TCP and nothing else, so a routed app's UDP
+is dropped — including QUIC and video calls, which is why routed apps fall back to slower
+plain TCP. Dropping is deliberate: sending that traffic directly would quietly go around the
+routing you asked for. If Orbot is not running, a routed app has no network at all rather than
+a direct connection, for the same reason. The traffic log marks which connections went through
+Tor, and shows *Tor cannot carry this* against what was dropped.
+
+Routing is per app, chosen the same way as *Skip the firewall*, and the two are mutually
+exclusive — an app excluded from the tunnel never reaches the relay, so there is nothing left
+to route. Turning routing on for the first app rebuilds the tunnel, because Orbot itself has
+to be excluded from it before it can carry anything.
+
 ## What this does not do
 
 It does not make you anonymous. A local firewall changes which servers your device talks to,
 and nothing else:
 
 - Your ISP or mobile carrier still sees every destination you connect to.
-- Every site you visit still sees your real IP address.
+- Every site you visit still sees your real IP address, unless you route that app through Tor.
 - Browser fingerprinting — screen size, fonts, timezone, canvas — is untouched, and is how
   most commercial tracking actually identifies you.
 - Anything you are signed in to knows exactly who you are regardless.
 
 Blocking trackers reduces how much gets collected about you and by whom. That is worth doing,
-and it is a different thing from anonymity. If you need to hide *where you are connecting
-from*, that requires a real remote VPN or Tor, neither of which this app is.
+and it is a different thing from anonymity. Tor routing hides your address from the far end,
+which is also a different thing from anonymity — if what you need is to be unidentifiable, use
+the Tor Browser, which was built for it.
 
 ## Limitations
 
@@ -171,7 +209,12 @@ Worth knowing before you rely on it:
   the firewall*; its traffic then bypasses the tunnel entirely. The default messaging app is
   flagged in that dialog for exactly this reason. Ordinary SMS is unaffected either way: it
   travels on the cellular control channel and never touches IP.
-- **Only one VPN can be active at a time.** Turning this on displaces any other VPN.
+- **Only one VPN can be active at a time.** Turning this on displaces any other VPN. That
+  includes Orbot's own VPN mode — which is why Tor routing here talks to Orbot's SOCKS proxy
+  instead, and why Orbot should be left in proxy mode rather than "VPN mode" while this app is
+  running.
+- **A routed app is only as available as Orbot.** If Orbot stops, that app's connections fail
+  rather than falling back to a direct route, and its UDP is dropped either way.
 - **ICMP is dropped**, so `ping` will not work while the tunnel is up. Relaying it needs a raw
   socket, which a non-rooted app cannot open.
 - **IP fragments are dropped** rather than reassembled.
@@ -360,6 +403,8 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 | `core/…/BlocklistParser.kt` | Reads hosts, AdGuard and plain-domain list formats |
 | `app/…/rules/BlocklistRepository.kt` | Downloads, caches and loads the subscribed lists |
 | `core/…/Dns.kt` | Query/response parsing and NXDOMAIN synthesis |
+| `core/…/Socks5.kt` | The SOCKS5 client that hands routed connections to Tor |
+| `app/…/rules/TorGateway.kt` | Whether Orbot is installed, listening, and how to start it |
 | `app/…/vpn/TunnelRelay.kt` | Reads the tun device, applies verdicts, owns the flow table |
 | `app/…/vpn/TcpFlow.kt` | The userspace TCP state machine |
 | `app/…/vpn/SelectorLoop.kt` | One NIO selector thread driving every relayed socket |
@@ -367,10 +412,12 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 
 ## Testing status
 
-`core/` has 94 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
+`core/` has 134 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
 wrapping, RST generation, DNS parsing (including compression-pointer loops and truncated
-input), suffix matching, cache expiry, blocklist parsing across all three formats, and the
-hash-set index. Run them with `./gradlew :core:test`.
+input), suffix matching, cache expiry, blocklist parsing across all three formats, the
+hash-set index, and the SOCKS5 client — including replies split across reads, a refusal, and
+server bytes arriving in the same read as the proxy's reply. Run them with
+`./gradlew :core:test`.
 
 The parser was also run over the real lists it ships with — 464,000 rules across six files —
 to check the extraction rate and confirm that none of twenty popular domains (google.com,

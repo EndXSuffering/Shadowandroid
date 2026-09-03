@@ -48,15 +48,48 @@ data class RuleSet(
      * separate carrier APN that the relay's protected sockets cannot reach.
      */
     val bypassedPackages: Set<String> = emptySet(),
+    /**
+     * Packages whose TCP connections are handed to Tor instead of being dialled directly.
+     *
+     * Stored by package rather than by uid so the choice survives a reinstall, which changes
+     * the uid. The tunnel needs uids, so the app layer resolves these into
+     * [RuleEngine.torUids] whenever the set or the installed apps change.
+     */
+    val torPackages: Set<String> = emptySet(),
 ) {
     fun withBypass(packageName: String, bypassed: Boolean): RuleSet {
         val next = bypassedPackages.toMutableSet()
         if (bypassed) next.add(packageName) else next.remove(packageName)
-        return copy(bypassedPackages = next)
+        // See [withTorRouting]: an excluded app never reaches the relay, so it cannot be
+        // routed through anything.
+        return copy(
+            bypassedPackages = next,
+            torPackages = if (bypassed) torPackages - packageName else torPackages,
+        )
     }
 
     fun isBypassed(packageName: String?): Boolean =
         packageName != null && packageName in bypassedPackages
+
+    /**
+     * Routing an app through Tor and excluding it from the tunnel are contradictory: an
+     * excluded app's packets never reach the relay, so there is nothing left to route. Turning
+     * one on therefore turns the other off.
+     */
+    fun withTorRouting(packageName: String, routed: Boolean): RuleSet {
+        val next = torPackages.toMutableSet()
+        if (routed) next.add(packageName) else next.remove(packageName)
+        return copy(
+            torPackages = next,
+            bypassedPackages = if (routed) bypassedPackages - packageName else bypassedPackages,
+        )
+    }
+
+    fun isTorRouted(packageName: String?): Boolean =
+        packageName != null && packageName in torPackages
+
+    /** Whether anything is routed at all, which decides if Orbot itself needs excluding. */
+    val usesTor: Boolean get() = torPackages.isNotEmpty()
 
     fun withAppRule(rule: AppRule): RuleSet {
         val next = appRules.toMutableMap()
@@ -98,6 +131,16 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
      */
     @Volatile
     var blocklists: BlocklistIndex = BlocklistIndex.EMPTY
+
+    /**
+     * The uids behind [RuleSet.torPackages], resolved by the app layer. Held separately for the
+     * same reason as [blocklists]: the mapping changes when apps are installed or removed,
+     * which has nothing to do with when the user edits a rule.
+     */
+    @Volatile
+    var torUids: Set<Int> = emptySet()
+
+    fun routesThroughTor(uid: Int): Boolean = uid in torUids
 
     /**
      * Verdict for a DNS query, where the name is exactly what the app asked for.
@@ -143,11 +186,25 @@ class RuleEngine(rules: RuleSet = RuleSet()) {
         isIpv6: Boolean,
         /** The connection's destination IP, matched against the lists' address rules. */
         destinationAddress: String? = null,
+        protocol: Int = IpProto.TCP,
+        destinationPort: Int = 0,
     ): Decision {
         val snapshot = rules
 
         if (isIpv6 && snapshot.blockIpv6) {
             return Decision.block(BlockReason.IPV6_DISABLED)
+        }
+
+        // Not a policy but a capability limit, so it is decided before any rule that could
+        // permit the flow. Tor relays TCP only; a routed app's UDP has nowhere to go, and
+        // letting it out directly would defeat the point of routing the app at all. DNS is
+        // the exception: it is answered by the system resolver, not by the app's own socket,
+        // and dropping it would leave the app unable to look anything up.
+        if (protocol == IpProto.UDP &&
+            destinationPort != Dns.PORT &&
+            routesThroughTor(uid)
+        ) {
+            return Decision.block(BlockReason.TOR_UNSUPPORTED)
         }
 
         // Permissive use of the reverse name is safe: the worst case is letting something

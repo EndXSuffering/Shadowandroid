@@ -32,6 +32,20 @@
     <string name="bypass_badge">Skipping firewall</string>
     <string name="bypass_active_warning">No rules apply to this app while it is skipping the firewall, and its connections will not appear in the traffic log.</string>
     <string name="bypass_sms_hint">This is your messaging app. Picture messages often travel on a separate carrier connection that the firewall cannot carry, so skipping the firewall here is the usual fix for MMS.</string>
+
+    <string name="tor_title">Route through Tor</string>
+    <string name="tor_summary">Send this app\'s connections through the Tor network using Orbot, so the sites it talks to see a Tor exit address instead of yours.</string>
+    <string name="tor_badge">Tor</string>
+    <string name="tor_explainer">Requires Orbot, the Tor Project\'s app. Expect it to be slower, and expect some services to challenge or refuse traffic arriving from Tor.</string>
+    <string name="tor_limits">Worth knowing: this hides your address from the sites this app reaches, but it is not anonymity. Your phone still looks up names normally, so your network provider can still see which sites you visit, and the app itself can still identify you by signing in. Connections that Tor cannot carry — anything over UDP, including video calls and QUIC — are dropped rather than sent unprotected.</string>
+    <string name="tor_orbot_ready">Orbot is running and accepting connections.</string>
+    <string name="tor_orbot_stopped">Orbot is installed but not answering, so this app has no network at all right now. Start Orbot and check again.</string>
+    <string name="tor_orbot_missing">Orbot is not installed, so nothing can be routed and this app has no network at all right now.</string>
+    <string name="action_open_orbot">Open Orbot</string>
+    <string name="action_install_orbot">Get Orbot</string>
+    <string name="detail_route">Route</string>
+    <string name="route_direct">Direct</string>
+    <string name="route_tor">Through Tor</string>
     <string name="shared_uid_summary">%1$s + %2$d more sharing this user ID</string>
 
     <string name="filter_all">All</string>
@@ -55,6 +69,7 @@
     <string name="reason_subscribed_list">Blocked by a list</string>
     <string name="reason_ipv6">IPv6 disabled</string>
     <string name="reason_encrypted_dns">Encrypted DNS refused</string>
+    <string name="reason_tor_unsupported">Tor cannot carry this</string>
 
     <string name="settings_policy">Policy</string>
     <string name="setting_block_by_default">Block by default</string>

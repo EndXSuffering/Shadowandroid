@@ -183,6 +183,7 @@ private fun TrafficRow(event: ConnectionEvent, onClick: () -> Unit) {
                 Text(
                     text = buildString {
                         append(IpProto.name(event.protocol))
+                        if (event.viaTor) append(" · Tor")
                         append(" · ")
                         append(formatTime(event.startedAtMillis))
                         if (reasonText != null) {
@@ -229,6 +230,10 @@ private fun ConnectionActions(
                 DetailLine(stringResource(R.string.detail_destination), "${event.displayTarget}:${event.destinationPort}")
                 DetailLine(stringResource(R.string.detail_address), event.destinationAddress)
                 DetailLine(stringResource(R.string.detail_protocol), IpProto.name(event.protocol))
+                DetailLine(
+                    stringResource(R.string.detail_route),
+                    stringResource(if (event.viaTor) R.string.route_tor else R.string.route_direct),
+                )
                 DetailLine(stringResource(R.string.detail_package), event.packageName ?: "—")
                 DetailLine(
                     stringResource(R.string.detail_verdict),
@@ -291,6 +296,7 @@ private fun reasonLabel(reason: BlockReason): Int = when (reason) {
     BlockReason.SUBSCRIBED_LIST -> R.string.reason_subscribed_list
     BlockReason.IPV6_DISABLED -> R.string.reason_ipv6
     BlockReason.ENCRYPTED_DNS -> R.string.reason_encrypted_dns
+    BlockReason.TOR_UNSUPPORTED -> R.string.reason_tor_unsupported
     BlockReason.NONE -> R.string.filter_allowed
 }
 

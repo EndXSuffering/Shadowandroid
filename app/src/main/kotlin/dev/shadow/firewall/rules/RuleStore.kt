@@ -33,6 +33,7 @@ private data class StoredRules(
     val useBlocklists: Boolean = true,
     val blockEncryptedDns: Boolean = true,
     val bypassedPackages: List<String> = emptyList(),
+    val torPackages: List<String> = emptyList(),
     /** Null means "never configured", which is how the defaults get applied exactly once. */
     val enabledBlocklists: List<String>? = null,
     val updateFrequency: String = UpdateFrequency.DAILY.name,
@@ -156,6 +157,7 @@ class RuleStore(private val context: Context) {
                 useBlocklists = it.rules.useBlocklists,
                 blockEncryptedDns = it.rules.blockEncryptedDns,
                 bypassedPackages = it.rules.bypassedPackages,
+                torPackages = it.rules.torPackages,
             ),
         )
     }
@@ -170,6 +172,9 @@ class RuleStore(private val context: Context) {
 
     suspend fun setBypassed(packageName: String, bypassed: Boolean) =
         update { it.copy(rules = it.rules.withBypass(packageName, bypassed)) }
+
+    suspend fun setTorRouted(packageName: String, routed: Boolean) =
+        update { it.copy(rules = it.rules.withTorRouting(packageName, routed)) }
 
     suspend fun setBlocklistEnabled(id: String, enabled: Boolean) = update {
         val next = it.enabledBlocklists.toMutableSet()
@@ -260,6 +265,7 @@ class RuleStore(private val context: Context) {
             useBlocklists = useBlocklists,
             blockEncryptedDns = blockEncryptedDns,
             bypassedPackages = bypassedPackages.toSet(),
+            torPackages = torPackages.toSet(),
             appRules = apps.associate { it.uid to AppRule(it.uid, it.blockWifi, it.blockMobile) },
             allowedUids = allowedUids.toSet(),
             blockedDomains = RuleEngine.normaliseAll(blockedDomains),
@@ -278,6 +284,7 @@ class RuleStore(private val context: Context) {
         useBlocklists = rules.useBlocklists,
         blockEncryptedDns = rules.blockEncryptedDns,
         bypassedPackages = rules.bypassedPackages.toList().sorted(),
+        torPackages = rules.torPackages.toList().sorted(),
         enabledBlocklists = enabledBlocklists.toList().sorted(),
         updateFrequency = updateFrequency.name,
         updateOnUnmeteredOnly = updateOnUnmeteredOnly,

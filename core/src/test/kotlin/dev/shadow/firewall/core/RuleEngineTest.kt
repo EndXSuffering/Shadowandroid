@@ -247,6 +247,105 @@ class RuleEngineTest {
         assertEquals(Verdict.ALLOW, subject.decide(chromeUid, NetworkType.WIFI, null, false).verdict)
     }
 
+    // ------------------------------------------- tor routing
+
+    @Test
+    fun `tor routing and bypass cannot both be set on one package`() {
+        // They contradict each other: an excluded app's packets never reach the relay, so
+        // there is nothing left to hand to Tor. Setting either has to clear the other.
+        val routed = RuleSet().withBypass("com.example.browser", true)
+            .withTorRouting("com.example.browser", true)
+        assertTrue(routed.isTorRouted("com.example.browser"))
+        assertFalse(routed.isBypassed("com.example.browser"))
+
+        val bypassed = routed.withBypass("com.example.browser", true)
+        assertTrue(bypassed.isBypassed("com.example.browser"))
+        assertFalse(bypassed.isTorRouted("com.example.browser"))
+    }
+
+    @Test
+    fun `usesTor is only true while something is routed`() {
+        assertFalse(RuleSet().usesTor)
+        val rules = RuleSet().withTorRouting("com.example.browser", true)
+        assertTrue(rules.usesTor)
+        assertFalse(rules.withTorRouting("com.example.browser", false).usesTor)
+    }
+
+    @Test
+    fun `udp from a routed app is dropped rather than sent around tor`() {
+        val subject = engine(RuleSet()).apply { torUids = setOf(chromeUid) }
+
+        val quic = subject.decide(
+            uid = chromeUid,
+            network = NetworkType.WIFI,
+            hostname = null,
+            isIpv6 = false,
+            protocol = IpProto.UDP,
+            destinationPort = 443,
+        )
+        assertEquals(Verdict.BLOCK, quic.verdict)
+        assertEquals(BlockReason.TOR_UNSUPPORTED, quic.reason)
+    }
+
+    @Test
+    fun `a routed app can still look names up`() {
+        // DNS is answered by the system resolver rather than the app's own socket, and
+        // dropping it would leave the app unable to resolve anything at all.
+        val subject = engine(RuleSet()).apply { torUids = setOf(chromeUid) }
+
+        val lookup = subject.decide(
+            uid = chromeUid,
+            network = NetworkType.WIFI,
+            hostname = null,
+            isIpv6 = false,
+            protocol = IpProto.UDP,
+            destinationPort = Dns.PORT,
+        )
+        assertEquals(Verdict.ALLOW, lookup.verdict)
+
+        val tcp = subject.decide(
+            uid = chromeUid,
+            network = NetworkType.WIFI,
+            hostname = null,
+            isIpv6 = false,
+            protocol = IpProto.TCP,
+            destinationPort = 443,
+        )
+        assertEquals(Verdict.ALLOW, tcp.verdict)
+    }
+
+    @Test
+    fun `udp is untouched for apps that are not routed`() {
+        val subject = engine(RuleSet()).apply { torUids = setOf(chromeUid) }
+        val decision = subject.decide(
+            uid = gameUid,
+            network = NetworkType.WIFI,
+            hostname = null,
+            isIpv6 = false,
+            protocol = IpProto.UDP,
+            destinationPort = 443,
+        )
+        assertEquals(Verdict.ALLOW, decision.verdict)
+    }
+
+    @Test
+    fun `an allow rule does not override what tor cannot carry`() {
+        // The UDP drop is a capability limit, not a policy, so an explicit per-app rule that
+        // permits this network must not turn it back on.
+        val rules = RuleSet().withAppRule(AppRule(chromeUid, blockWifi = false, blockMobile = true))
+        val subject = engine(rules).apply { torUids = setOf(chromeUid) }
+
+        val decision = subject.decide(
+            uid = chromeUid,
+            network = NetworkType.WIFI,
+            hostname = null,
+            isIpv6 = false,
+            protocol = IpProto.UDP,
+            destinationPort = 443,
+        )
+        assertEquals(BlockReason.TOR_UNSUPPORTED, decision.reason)
+    }
+
     // ------------------------------------ subscribed allowlists
 
     private fun engineWithAllowlist(): RuleEngine {

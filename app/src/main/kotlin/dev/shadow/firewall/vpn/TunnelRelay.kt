@@ -13,12 +13,14 @@ import dev.shadow.firewall.core.IpProto
 import dev.shadow.firewall.core.PacketFactory
 import dev.shadow.firewall.core.RuleEngine
 import dev.shadow.firewall.core.TcpSegment
+import dev.shadow.firewall.core.Tor
 import dev.shadow.firewall.core.UdpDatagram
 import dev.shadow.firewall.core.Verdict
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.nio.channels.DatagramChannel
 import java.nio.channels.SocketChannel
 import java.util.concurrent.ConcurrentHashMap
@@ -49,6 +51,8 @@ class TunnelRelay(
     private val onBytes: (eventId: Long, sent: Long, received: Long) -> Unit,
     private val protectTcp: (SocketChannel) -> Boolean,
     private val protectUdp: (DatagramChannel) -> Boolean,
+    /** Where Tor is listening, for the apps the user has routed through it. */
+    private val torProxy: InetSocketAddress = InetSocketAddress(Tor.SOCKS_HOST, Tor.SOCKS_PORT),
 ) {
 
     private val sink = TunWriter(tunOutput)
@@ -77,6 +81,9 @@ class TunnelRelay(
     @Volatile var dnsQueriesSeen: Long = 0; private set
     @Volatile var dnsQueriesBlocked: Long = 0; private set
     @Volatile var encryptedDnsRefused: Long = 0; private set
+
+    /** Connections handed to Tor, so the UI can say whether routing is doing anything. */
+    @Volatile var torFlows: Long = 0; private set
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -161,7 +168,7 @@ class TunnelRelay(
             return
         }
 
-        val decision = judge(key, packet, segment.sourcePort, segment.destinationPort)
+        val decision = judge(key, packet, segment.sourcePort, segment.destinationPort, IpProto.TCP)
         if (decision.isBlocked) {
             sink.write(PacketFactory.buildRstFor(segment))
             return
@@ -183,6 +190,7 @@ class TunnelRelay(
                 tcpFlows.remove(closed.key, closed)
                 uidResolver.forget(closed.key)
             },
+            proxyAddress = if (decision.viaTor) torProxy else null,
         )
         tcpFlows[key] = flow
         flow.open(segment, protectTcp)
@@ -218,7 +226,7 @@ class TunnelRelay(
             udpFlows.remove(key, existing)
         }
 
-        val decision = judge(key, packet, datagram.sourcePort, datagram.destinationPort)
+        val decision = judge(key, packet, datagram.sourcePort, datagram.destinationPort, IpProto.UDP)
         if (decision.isBlocked) return // silently dropped; UDP senders expect loss
 
         val eventId = decision.eventId
@@ -336,7 +344,7 @@ class TunnelRelay(
 
     // -------------------------------------------------------------- verdicts
 
-    private class Judgement(val isBlocked: Boolean, val eventId: Long)
+    private class Judgement(val isBlocked: Boolean, val eventId: Long, val viaTor: Boolean)
 
     /** Resolves the owning app, applies the rules, and records the result in the log. */
     private fun judge(
@@ -344,6 +352,7 @@ class TunnelRelay(
         packet: IpPacket,
         sourcePort: Int,
         destinationPort: Int,
+        protocol: Int,
     ): Judgement {
         val uid = uidResolver.resolve(
             key,
@@ -355,14 +364,27 @@ class TunnelRelay(
         val destination = key.destinationAddress
         val hostname = hostnames.get(destination)
         val network = networkMonitor.currentType
-        val decision = ruleEngine.decide(uid, network, hostname, packet.isIpv6, destination)
+        val decision = ruleEngine.decide(
+            uid = uid,
+            network = network,
+            hostname = hostname,
+            isIpv6 = packet.isIpv6,
+            destinationAddress = destination,
+            protocol = protocol,
+            destinationPort = destinationPort,
+        )
+        // Only TCP can be routed; UDP for a routed app was refused by the engine above.
+        val viaTor = !decision.isBlocked &&
+            protocol == IpProto.TCP &&
+            ruleEngine.routesThroughTor(uid)
 
         if (decision.isBlocked) {
             flowsBlocked++
             // Retries of a blocked connection should not each produce a log entry.
-            if (!shouldLogBlock(key)) return Judgement(true, 0)
+            if (!shouldLogBlock(key)) return Judgement(true, 0, false)
         } else {
             flowsAllowed++
+            if (viaTor) torFlows++
         }
 
         val identity = identify(uid)
@@ -384,9 +406,10 @@ class TunnelRelay(
                 verdict = decision.verdict,
                 reason = decision.reason,
                 ruleSource = decision.source,
+                viaTor = viaTor,
             ),
         )
-        return Judgement(decision.isBlocked, eventId)
+        return Judgement(decision.isBlocked, eventId, viaTor)
     }
 
     private fun logBlockedLookup(
@@ -451,7 +474,9 @@ class TunnelRelay(
             val now = System.currentTimeMillis()
 
             for (flow in tcpFlows.values) {
-                val limit = if (flow.isEstablished) TCP_IDLE_MILLIS else TCP_HANDSHAKE_MILLIS
+                // A flow still handshaking sets its own limit: going through Tor means waiting
+                // on a circuit, which takes far longer than dialling a server directly.
+                val limit = if (flow.isEstablished) TCP_IDLE_MILLIS else flow.handshakeTimeoutMillis
                 if (now - flow.lastActivityMillis > limit) flow.abort()
             }
             for (flow in udpFlows.values) {
@@ -485,7 +510,6 @@ class TunnelRelay(
         const val MAX_DATAGRAM = 65535
 
         const val SWEEP_INTERVAL_MILLIS = 10_000L
-        const val TCP_HANDSHAKE_MILLIS = 30_000L
         const val TCP_IDLE_MILLIS = 5 * 60_000L
         const val UDP_IDLE_MILLIS = 60_000L
         const val DNS_IDLE_MILLIS = 15_000L
