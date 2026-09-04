@@ -47,6 +47,7 @@
     <string name="route_direct">Direct</string>
     <string name="route_tor">Through Tor</string>
     <string name="shared_uid_summary">%1$s + %2$d more sharing this user ID</string>
+    <string name="messaging_app_marker">Your messaging app — tap for the MMS fix</string>
 
     <string name="filter_all">All</string>
     <string name="filter_blocked">Blocked</string>

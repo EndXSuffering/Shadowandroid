@@ -20,6 +20,8 @@ data class InstalledApp(
     val packageNames: List<String>,
     val label: String,
     val isSystem: Boolean,
+    /** The default SMS app, which the list treats as an ordinary app however it shipped. */
+    val isDefaultSms: Boolean = false,
 ) {
     val primaryPackage: String get() = packageNames.first()
     val sharesUid: Boolean get() = packageNames.size > 1
@@ -60,13 +62,18 @@ class AppRepository(context: Context) {
             // alphabetically so the list order is stable between launches.
             val sorted = infos.sortedBy { it.packageName }
             val applicationInfo = sorted.first().applicationInfo!!
+            val names = sorted.map { it.packageName }
             InstalledApp(
                 uid = uid,
-                packageNames = sorted.map { it.packageName },
+                packageNames = names,
                 label = packageManager.getApplicationLabel(applicationInfo).toString(),
                 isSystem = (applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+                isDefaultSms = names.any { it == defaultSmsPackage },
             )
-        }.sortedWith(compareBy({ it.isSystem }, { it.label.lowercase() }))
+            // Sorting it with the ordinary apps rather than at the bottom of the system pile:
+            // it is listed whether or not system apps are shown, so burying it would only
+            // move the problem.
+        }.sortedWith(compareBy({ it.isSystem && !it.isDefaultSms }, { it.label.lowercase() }))
     }
 
     /**

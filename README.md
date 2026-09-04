@@ -206,9 +206,10 @@ Worth knowing before you rely on it:
 - **MMS may need the messaging app to skip the firewall.** Picture messages are often carried
   on a separate carrier APN that a userspace tunnel cannot reach — a routing problem rather
   than a blocking one, so no rule change fixes it. Tap the app in the list and turn on *Skip
-  the firewall*; its traffic then bypasses the tunnel entirely. The default messaging app is
-  flagged in that dialog for exactly this reason. Ordinary SMS is unaffected either way: it
-  travels on the cellular control channel and never touches IP.
+  the firewall*; its traffic then bypasses the tunnel entirely. Your messaging app is marked
+  in the list and always shown there — it is preinstalled on most phones, so the *System apps*
+  filter would otherwise hide the one app this fix is for. Ordinary SMS is unaffected either
+  way: it travels on the cellular control channel and never touches IP.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN. That
   includes Orbot's own VPN mode — which is why Tor routing here talks to Orbot's SOCKS proxy
   instead, and why Orbot should be left in proxy mode rather than "VPN mode" while this app is

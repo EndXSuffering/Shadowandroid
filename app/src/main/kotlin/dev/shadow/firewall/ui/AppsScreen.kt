@@ -139,7 +139,7 @@ fun AppsScreen(
             bypassed = item.app.packageNames.any(settings.rules::isBypassed),
             torRouted = item.app.packageNames.any(settings.rules::isTorRouted),
             torAvailability = torAvailability,
-            isDefaultSmsApp = viewModel.defaultSmsPackage in item.app.packageNames,
+            isDefaultSmsApp = item.app.isDefaultSms,
             onBypass = { bypass ->
                 // A uid can cover several packages; exclude every one of them or the app
                 // keeps a route into the tunnel through whichever was left behind.
@@ -380,6 +380,15 @@ private fun AppRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (item.app.isDefaultSms) {
+                    // Named on the row, not just inside the dialog: someone looking for it is
+                    // scanning the list for a label they recognise, which may not be "Messages".
+                    Text(
+                        text = stringResource(R.string.messaging_app_marker),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
 
             if (bypassed) {
