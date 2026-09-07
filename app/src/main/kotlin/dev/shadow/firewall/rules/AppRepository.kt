@@ -12,6 +12,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
+ * An app a userspace tunnel is known to interfere with, for reasons no rule can fix.
+ *
+ * These are all the same shape of problem: traffic that does not go out over the ordinary
+ * default network, so relaying it through a tun device either cannot work or breaks the
+ * timing the feature depends on. The answer in every case is to exclude the app rather than
+ * to allow it, which is why they are surfaced together.
+ */
+enum class TunnelTrouble {
+    /** Picture messaging rides a separate carrier APN the relay cannot reach. */
+    MESSAGING,
+
+    /** Car projection talks to the head unit over its own link, not the default network. */
+    CAR_PROJECTION,
+}
+
+/**
  * One row in the app list. Android can share a uid between packages, and the firewall works
  * at uid granularity, so an entry may cover several packages.
  */
@@ -20,8 +36,12 @@ data class InstalledApp(
     val packageNames: List<String>,
     val label: String,
     val isSystem: Boolean,
-    /** The default SMS app, which the list treats as an ordinary app however it shipped. */
-    val isDefaultSms: Boolean = false,
+    /**
+     * Set when this is an app the tunnel is known to break. Such an app is listed whatever the
+     * system-app filter says: they ship preinstalled, so the filter would hide exactly the
+     * apps someone came looking for.
+     */
+    val trouble: TunnelTrouble? = null,
 ) {
     val primaryPackage: String get() = packageNames.first()
     val sharesUid: Boolean get() = packageNames.size > 1
@@ -68,12 +88,18 @@ class AppRepository(context: Context) {
                 packageNames = names,
                 label = packageManager.getApplicationLabel(applicationInfo).toString(),
                 isSystem = (applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
-                isDefaultSms = names.any { it == defaultSmsPackage },
+                trouble = troubleFor(names),
             )
-            // Sorting it with the ordinary apps rather than at the bottom of the system pile:
-            // it is listed whether or not system apps are shown, so burying it would only
-            // move the problem.
-        }.sortedWith(compareBy({ it.isSystem && !it.isDefaultSms }, { it.label.lowercase() }))
+            // Sorted with the ordinary apps rather than at the bottom of the system pile: they
+            // are listed whether or not system apps are shown, so burying them would only move
+            // the problem.
+        }.sortedWith(compareBy({ it.isSystem && it.trouble == null }, { it.label.lowercase() }))
+    }
+
+    private fun troubleFor(names: List<String>): TunnelTrouble? = when {
+        names.any { it == defaultSmsPackage } -> TunnelTrouble.MESSAGING
+        names.any { it in CAR_PROJECTION_PACKAGES } -> TunnelTrouble.CAR_PROJECTION
+        else -> null
     }
 
     /**
@@ -137,5 +163,18 @@ class AppRepository(context: Context) {
     fun invalidate() {
         identityCache.clear()
         iconCache.clear()
+    }
+
+    private companion object {
+        /**
+         * Car projection. Android Auto reaches the head unit over USB or its own Wi-Fi link
+         * rather than the default network, and coordinates the handshake through Play
+         * services, so the tunnel sits in the middle of a connection it was never meant to
+         * carry. Samsung ships its own projection package alongside Google's.
+         */
+        val CAR_PROJECTION_PACKAGES = setOf(
+            "com.google.android.projection.gearhead",
+            "com.samsung.android.drivelink.stub",
+        )
     }
 }

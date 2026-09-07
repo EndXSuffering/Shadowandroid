@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.shadow.firewall.R
 import dev.shadow.firewall.core.NetworkType
 import dev.shadow.firewall.rules.TorAvailability
+import dev.shadow.firewall.rules.TunnelTrouble
 
 /**
  * The per-app rule list: one row per uid, with a Wi-Fi and a mobile-data toggle.
@@ -139,7 +140,7 @@ fun AppsScreen(
             bypassed = item.app.packageNames.any(settings.rules::isBypassed),
             torRouted = item.app.packageNames.any(settings.rules::isTorRouted),
             torAvailability = torAvailability,
-            isDefaultSmsApp = item.app.isDefaultSms,
+            trouble = item.app.trouble,
             onBypass = { bypass ->
                 // A uid can cover several packages; exclude every one of them or the app
                 // keeps a route into the tunnel through whichever was left behind.
@@ -165,7 +166,7 @@ private fun AppDetailDialog(
     bypassed: Boolean,
     torRouted: Boolean,
     torAvailability: TorAvailability,
-    isDefaultSmsApp: Boolean,
+    trouble: TunnelTrouble?,
     onBypass: (Boolean) -> Unit,
     onTorRouted: (Boolean) -> Unit,
     onOpenOrbot: () -> Unit,
@@ -184,9 +185,9 @@ private fun AppDetailDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (isDefaultSmsApp) {
+                trouble?.let {
                     Text(
-                        text = stringResource(R.string.bypass_sms_hint),
+                        text = stringResource(hintFor(it)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -227,6 +228,18 @@ private fun AppDetailDialog(
             }
         },
     )
+}
+
+/** The one-line label on the list row, which is what makes the app findable at a glance. */
+private fun markerFor(trouble: TunnelTrouble): Int = when (trouble) {
+    TunnelTrouble.MESSAGING -> R.string.messaging_app_marker
+    TunnelTrouble.CAR_PROJECTION -> R.string.car_app_marker
+}
+
+/** The fuller explanation in the dialog, once they have opened the app they were looking for. */
+private fun hintFor(trouble: TunnelTrouble): Int = when (trouble) {
+    TunnelTrouble.MESSAGING -> R.string.bypass_sms_hint
+    TunnelTrouble.CAR_PROJECTION -> R.string.bypass_car_hint
 }
 
 @Composable
@@ -380,11 +393,12 @@ private fun AppRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (item.app.isDefaultSms) {
+                item.app.trouble?.let { trouble ->
                     // Named on the row, not just inside the dialog: someone looking for it is
-                    // scanning the list for a label they recognise, which may not be "Messages".
+                    // scanning the list for a label they recognise, and a messaging app may be
+                    // called anything its maker or carrier chose.
                     Text(
-                        text = stringResource(R.string.messaging_app_marker),
+                        text = stringResource(markerFor(trouble)),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )

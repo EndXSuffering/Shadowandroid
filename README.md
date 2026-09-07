@@ -210,6 +210,13 @@ Worth knowing before you rely on it:
   in the list and always shown there — it is preinstalled on most phones, so the *System apps*
   filter would otherwise hide the one app this fix is for. Ordinary SMS is unaffected either
   way: it travels on the cellular control channel and never touches IP.
+- **Android Auto may need the same treatment.** Projection reaches the head unit over USB or
+  its own Wi-Fi link rather than your normal connection, so a tunnel in the middle can stop it
+  pairing or drop it mid-drive — wireless projection more often than wired. Android Auto is
+  marked and always listed for the same reason as the messaging app; turn on *Skip the
+  firewall* for it, and if that is not enough, for Google Play services too, which brokers the
+  connection. Apps that merely *appear* on the car screen — maps, music, podcasts — run on the
+  phone over ordinary connections and keep being filtered normally.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN. That
   includes Orbot's own VPN mode — which is why Tor routing here talks to Orbot's SOCKS proxy
   instead, and why Orbot should be left in proxy mode rather than "VPN mode" while this app is

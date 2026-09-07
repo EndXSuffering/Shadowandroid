@@ -62,10 +62,10 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
         combine(_installedApps, settings, _appQuery, _showSystemApps) { installed, config, query, showSystem ->
             val needle = query.trim().lowercase()
             installed.asSequence()
-                // The messaging app is preinstalled on most phones, so the system-app filter
-                // hid the one app people come here to exclude — the fix for MMS was behind a
-                // toggle nothing told them to turn on. It is always listed.
-                .filter { showSystem || !it.isSystem || it.isDefaultSms }
+                // Apps the tunnel is known to break ship preinstalled, so the system-app
+                // filter hid the very apps people come here to exclude — the fix was behind a
+                // toggle nothing told them to turn on. Those are always listed.
+                .filter { showSystem || !it.isSystem || it.trouble != null }
                 .filter {
                     needle.isEmpty() ||
                         it.label.lowercase().contains(needle) ||
