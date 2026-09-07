@@ -173,6 +173,12 @@ class BlocklistRepository(
                         entryCount = counts.first,
                         addressCount = counts.second,
                     )
+                    // A list can arrive intact and still leave us with nothing, if every rule
+                    // in it uses a construct this app cannot express. Saying so beats leaving
+                    // the row reading "not downloaded yet", which blames the wrong thing.
+                    if (counts.first == 0 && counts.second == 0) {
+                        store.recordBlocklistFailure(source.id, EMPTY_AFTER_PARSE)
+                    }
                     true
                 }
                 else -> {
@@ -266,6 +272,7 @@ class BlocklistRepository(
         const val CONNECT_TIMEOUT_MILLIS = 20_000
         const val READ_TIMEOUT_MILLIS = 60_000
         const val READ_BUFFER = 1 shl 16
+        const val EMPTY_AFTER_PARSE = "Downloaded, but none of its rules apply at DNS level"
         const val USER_AGENT = "ShadowFirewall/1.0 (+https://github.com/EndXSuffering/Shadowandroid)"
     }
 }

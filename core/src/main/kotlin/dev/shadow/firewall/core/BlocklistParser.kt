@@ -38,6 +38,20 @@ object BlocklistParser {
     /** AdGuard modifiers that leave a rule as a plain domain block. */
     private val HARMLESS_MODIFIERS = setOf("important", "all")
 
+    /**
+     * $dnsrewrite answers that amount to refusing a name rather than answering it differently.
+     *
+     * A refusal code, or an address that goes nowhere, is exactly what this app does to a
+     * blocked domain, so a rule rewriting to one of these *is* a block.
+     */
+    private val REFUSING_ANSWERS = setOf(
+        "nxdomain", "refused", "servfail", "nodata",
+        "0.0.0.0", "::", "127.0.0.1", "::1",
+    )
+
+    /** AdGuard's own blocking sinks are named "<something>-block.dns.adguard.com". */
+    private const val ADGUARD_BLOCK_SUFFIX = "-block.dns.adguard.com"
+
     fun parseLine(rawLine: String): Rule? {
         val line = rawLine.trim()
         if (line.isEmpty()) return null
@@ -115,6 +129,43 @@ object BlocklistParser {
 
     // --------------------------------------------------------------- adblock
 
+    /**
+     * Whether a rule's modifiers leave it meaning "refuse this domain".
+     *
+     * Most modifiers narrow a rule to something this app cannot express, and those are dropped.
+     * $dnsrewrite is the exception worth modelling: a rewrite to a refusal code, a null
+     * address, or one of AdGuard's blocking sinks is a block written a different way. It is
+     * how AdGuard's pop-up list is written — every rule in it, so without this the list parses
+     * to nothing at all — and it costs nothing elsewhere, since no other list we ship uses it.
+     *
+     * A rewrite pointing at somewhere real stays dropped. That is a redirection, and this app
+     * can only permit a name or refuse it; pretending a redirect is a block would take down a
+     * domain the list wanted answered, just differently.
+     */
+    private fun modifiersKeepItABlock(modifiers: String, isException: Boolean): Boolean {
+        for (modifier in modifiers.split(',')) {
+            val name = modifier.substringBefore('=').trim().lowercase()
+            if (name.isEmpty() || name in HARMLESS_MODIFIERS) continue
+            if (name != "dnsrewrite") return false
+            // "@@||host^$dnsrewrite" switches rewriting off for a host, which is an exception
+            // whatever it names. Honouring it can only ever permit something.
+            if (isException) continue
+            if (!modifier.contains('=')) return false
+            if (!isRefusal(modifier.substringAfter('='))) return false
+        }
+        return true
+    }
+
+    /** True when a $dnsrewrite answer refuses the name rather than redirecting it. */
+    private fun isRefusal(rawAnswer: String): Boolean {
+        val answer = rawAnswer.trim().lowercase().trimEnd('.')
+        if (answer.isEmpty()) return false
+        // The long form is "rcode;type;value", so either end can carry the refusal.
+        if (answer.substringBefore(';').trim() in REFUSING_ANSWERS) return true
+        val value = answer.substringAfterLast(';').trim()
+        return value in REFUSING_ANSWERS || value.endsWith(ADGUARD_BLOCK_SUFFIX)
+    }
+
     private fun parseAdBlock(rawRule: String, isException: Boolean): Rule? {
         var rule = rawRule.trim()
         if (rule.isEmpty()) return null
@@ -132,10 +183,7 @@ object BlocklistParser {
         }
         // A rule with modifiers we do not model may mean something narrower than "block this
         // domain" — $denyallow and $client both do — so only pass the ones we understand.
-        if (modifiers != null) {
-            val names = modifiers.split(',').map { it.substringBefore('=').trim().lowercase() }
-            if (names.any { it.isNotEmpty() && it !in HARMLESS_MODIFIERS }) return null
-        }
+        if (modifiers != null && !modifiersKeepItABlock(modifiers, isException)) return null
 
         if (rule.startsWith("||")) rule = rule.substring(2)
         else if (rule.startsWith("|")) rule = rule.substring(1)

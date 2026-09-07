@@ -79,6 +79,51 @@ class BlocklistParserTest {
     }
 
     @Test
+    fun `reads a dnsrewrite to a blocking sink as a block`() {
+        // Every rule in AdGuard's pop-up list is written this way, so without this the whole
+        // list parses to nothing and the app reports it as never downloaded.
+        assertEquals(
+            listOf("gamengirls.com"),
+            blocked("||gamengirls.com^\$dnsrewrite=ad-block.dns.adguard.com"),
+        )
+        assertEquals(
+            listOf("example.com"),
+            blocked("||example.com^\$dnsrewrite=family-block.dns.adguard.com"),
+        )
+    }
+
+    @Test
+    fun `reads a dnsrewrite to a refusal as a block`() {
+        assertEquals(listOf("a.com"), blocked("||a.com^\$dnsrewrite=NXDOMAIN"))
+        assertEquals(listOf("b.com"), blocked("||b.com^\$dnsrewrite=REFUSED"))
+        assertEquals(listOf("c.com"), blocked("||c.com^\$dnsrewrite=0.0.0.0"))
+        assertEquals(listOf("d.com"), blocked("||d.com^\$dnsrewrite=NOERROR;A;0.0.0.0"))
+    }
+
+    @Test
+    fun `drops a dnsrewrite that redirects somewhere real`() {
+        // This app can permit a name or refuse it, and nothing in between. Treating a
+        // redirection as a block would take down a domain the list wanted answered.
+        assertNull(BlocklistParser.parseLine("||example.com^\$dnsrewrite=NOERROR;A;93.184.216.34"))
+        assertNull(BlocklistParser.parseLine("||example.com^\$dnsrewrite=elsewhere.example.org"))
+        assertNull(BlocklistParser.parseLine("||example.com^\$dnsrewrite"))
+    }
+
+    @Test
+    fun `an exception turning dnsrewrite off is still an exception`() {
+        assertEquals(listOf("example.com"), allowed("@@||example.com^\$dnsrewrite"))
+    }
+
+    @Test
+    fun `a dnsrewrite alongside a narrowing modifier is still dropped`() {
+        assertNull(
+            BlocklistParser.parseLine(
+                "||example.com^\$dnsrewrite=NXDOMAIN,client=192.168.1.1",
+            ),
+        )
+    }
+
+    @Test
     fun `drops a path rule rather than blocking the whole host`() {
         assertNull(BlocklistParser.parseLine("||example.com/ads/banner.png"))
         assertNull(BlocklistParser.parseLine("||example.com/ads/*"))

@@ -210,7 +210,9 @@ private fun BlocklistRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (status.enabled) {
+                } else if (status.enabled && status.lastError == null) {
+                    // With an error to show, this would contradict it: the red line below
+                    // says what actually happened.
                     Text(
                         stringResource(R.string.blocklist_not_downloaded),
                         style = MaterialTheme.typography.labelSmall,
