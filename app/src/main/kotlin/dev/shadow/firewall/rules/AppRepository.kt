@@ -90,10 +90,17 @@ class AppRepository(context: Context) {
                 isSystem = (applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
                 trouble = troubleFor(names),
             )
-            // Sorted with the ordinary apps rather than at the bottom of the system pile: they
-            // are listed whether or not system apps are shown, so burying them would only move
-            // the problem.
-        }.sortedWith(compareBy({ it.isSystem && it.trouble == null }, { it.label.lowercase() }))
+            // Apps the tunnel is known to break go first, in the order of the reasons — the
+            // messaging app ahead of car projection, since MMS is the more common complaint.
+            // They are why someone opens this list, so they should not have to be found.
+            // Everything else keeps the old order: ordinary apps, then system apps, by name.
+        }.sortedWith(
+            compareBy(
+                { it.trouble?.ordinal ?: Int.MAX_VALUE },
+                { it.isSystem },
+                { it.label.lowercase() },
+            ),
+        )
     }
 
     private fun troubleFor(names: List<String>): TunnelTrouble? = when {
