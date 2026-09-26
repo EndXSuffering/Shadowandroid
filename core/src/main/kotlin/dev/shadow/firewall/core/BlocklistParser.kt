@@ -16,8 +16,8 @@ package dev.shadow.firewall.core
  */
 object BlocklistParser {
 
-    /** Whether a rule names a hostname or a literal IP address. */
-    enum class Kind { DOMAIN, ADDRESS }
+    /** Whether a rule names a hostname, a literal IP address, or a wildcard pattern. */
+    enum class Kind { DOMAIN, ADDRESS, PATTERN }
 
     /** A single parsed rule. [values] is usually one entry; hosts lines may carry several. */
     data class Rule(
@@ -73,6 +73,8 @@ object BlocklistParser {
         val blocked = ArrayList<String>()
         val allowed = ArrayList<String>()
         val addresses = ArrayList<String>()
+        val blockedPatterns = ArrayList<String>()
+        val allowedPatterns = ArrayList<String>()
         var skipped = 0
         for (line in lines) {
             val rule = parseLine(line)
@@ -83,11 +85,13 @@ object BlocklistParser {
             when {
                 rule.kind == Kind.ADDRESS && !rule.isException -> addresses.addAll(rule.values)
                 rule.kind == Kind.ADDRESS -> Unit // an exception for a literal address; rare
+                rule.kind == Kind.PATTERN && rule.isException -> allowedPatterns.addAll(rule.values)
+                rule.kind == Kind.PATTERN -> blockedPatterns.addAll(rule.values)
                 rule.isException -> allowed.addAll(rule.values)
                 else -> blocked.addAll(rule.values)
             }
         }
-        return ParsedList(blocked, allowed, addresses, skipped)
+        return ParsedList(blocked, allowed, addresses, skipped, blockedPatterns, allowedPatterns)
     }
 
     data class ParsedList(
@@ -101,6 +105,12 @@ object BlocklistParser {
         val blockedAddresses: List<String>,
         /** Non-comment lines we could not turn into a rule. */
         val skipped: Int,
+        /**
+         * Wildcard rules, kept as written. Ad networks use one of these to cover a rotating
+         * pool of hostnames, so dropping them left whichever host a page picked unblocked.
+         */
+        val blockedPatterns: List<String> = emptyList(),
+        val allowedPatterns: List<String> = emptyList(),
     )
 
     private fun isComment(line: String): Boolean {
@@ -199,7 +209,12 @@ object BlocklistParser {
         }
 
         rule = rule.substringBefore('^').substringBefore('|')
-        if (rule.contains('*')) return null // wildcards we cannot express as a suffix match
+        // A wildcard cannot become a suffix-match entry, but it can still be honoured as a
+        // pattern. DomainPattern refuses anything too thin to be safe.
+        if (rule.contains('*')) {
+            val pattern = DomainPattern.compile(rule) ?: return null
+            return Rule(listOf(pattern.source), isException, Kind.PATTERN)
+        }
         rule = stripPort(rule)
 
         val token = RuleEngine.normalise(rule)

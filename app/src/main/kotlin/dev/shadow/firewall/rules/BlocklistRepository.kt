@@ -6,6 +6,7 @@ import dev.shadow.firewall.core.Blocklist
 import dev.shadow.firewall.core.BlocklistIndex
 import dev.shadow.firewall.core.BlocklistParser
 import dev.shadow.firewall.core.DomainHashSet
+import dev.shadow.firewall.core.DomainPatternSet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,6 +68,7 @@ class BlocklistRepository(
 
     /** Reads the cached indexes from disk into memory. Safe to call repeatedly. */
     suspend fun load() = withContext(Dispatchers.IO) {
+        deleteLegacyCaches()
         val settings = store.blocklistState()
         val lists = ArrayList<Blocklist>()
 
@@ -200,6 +202,8 @@ class BlocklistRepository(
         val blocked = DomainHashSet.Builder(source.approximateEntries.coerceIn(1024, 4_000_000))
         val allowed = DomainHashSet.Builder(256)
         val addresses = DomainHashSet.Builder(256)
+        val blockedPatterns = ArrayList<String>()
+        val allowedPatterns = ArrayList<String>()
 
         val raw = BufferedInputStream(connection.inputStream)
         val stream = if (connection.contentEncoding?.contains("gzip", ignoreCase = true) == true) {
@@ -215,6 +219,10 @@ class BlocklistRepository(
                 when {
                     rule.kind == BlocklistParser.Kind.ADDRESS ->
                         if (!rule.isException) rule.values.forEach(addresses::add)
+                    rule.kind == BlocklistParser.Kind.PATTERN -> {
+                        val into = if (rule.isException) allowedPatterns else blockedPatterns
+                        if (into.size < DomainPatternSet.MAX_PATTERNS) into.addAll(rule.values)
+                    }
                     rule.isException -> rule.values.forEach(allowed::add)
                     else -> rule.values.forEach(blocked::add)
                 }
@@ -224,6 +232,8 @@ class BlocklistRepository(
         val blockedSet = blocked.build()
         val allowedSet = allowed.build()
         val addressSet = addresses.build()
+        val blockedPatternSet = DomainPatternSet.build(blockedPatterns)
+        val allowedPatternSet = DomainPatternSet.build(allowedPatterns)
 
         // Write to a temporary file and rename, so a download interrupted halfway cannot
         // leave a half-written index that the next start would load.
@@ -233,6 +243,8 @@ class BlocklistRepository(
             blockedSet.writeTo(out)
             allowedSet.writeTo(out)
             addressSet.writeTo(out)
+            blockedPatternSet.writeTo(out)
+            allowedPatternSet.writeTo(out)
         }
         if (!temporary.renameTo(target)) {
             temporary.delete()
@@ -240,9 +252,9 @@ class BlocklistRepository(
         }
 
         return if (source.isAllowlist) {
-            allowedSet.size to 0
+            allowedSet.size + allowedPatternSet.size to 0
         } else {
-            blockedSet.size to addressSet.size
+            blockedSet.size + blockedPatternSet.size to addressSet.size
         }
     }
 
@@ -255,6 +267,8 @@ class BlocklistRepository(
                 allowed = DomainHashSet.readFrom(input),
                 blockedAddresses = DomainHashSet.readFrom(input),
                 isAllowlist = source.isAllowlist,
+                blockedPatterns = DomainPatternSet.readFrom(input),
+                allowedPatterns = DomainPatternSet.readFrom(input),
             )
         }
 
@@ -265,7 +279,19 @@ class BlocklistRepository(
         load()
     }
 
-    private fun indexFile(id: String) = File(directory, "$id.idx")
+    /**
+     * The cache filename carries its format. Wildcard patterns added two sections to the file,
+     * and renaming is kinder than letting every old cache fail to parse on first launch: an
+     * unknown name simply looks like "not downloaded", which the next refresh fixes quietly.
+     */
+    private fun indexFile(id: String) = File(directory, "$id.idx2")
+
+    /** Removes caches written in a format this build no longer reads. */
+    private fun deleteLegacyCaches() {
+        directory.listFiles()?.forEach { file ->
+            if (file.name.endsWith(".idx") || file.name.endsWith(".idx.tmp")) file.delete()
+        }
+    }
 
     private companion object {
         const val TAG = "BlocklistRepository"

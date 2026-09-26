@@ -135,11 +135,23 @@ class BlocklistParserTest {
     }
 
     @Test
-    fun `drops regex, cosmetic and wildcard rules`() {
+    fun `drops regex and cosmetic rules`() {
         assertNull(BlocklistParser.parseLine("/banner\\d+\\.gif/"))
         assertNull(BlocklistParser.parseLine("@@/\\.(gif|jpe?g)#(\\/?.+)?/"))
         assertNull(BlocklistParser.parseLine("example.com##.ad-banner"))
-        assertNull(BlocklistParser.parseLine("||*.doubleclick.net^"))
+    }
+
+    @Test
+    fun `keeps a wildcard rule as a pattern, unless it is too broad`() {
+        // A wildcard used to be dropped outright. It is honoured as a pattern now, which is
+        // what stops a rotating pool of ad hosts slipping through one host at a time. The
+        // safety bar lives in DomainPattern: a rule needs enough literal text to be trusted.
+        val safe = BlocklistParser.parseLine("||*.doubleclick.net^")
+        assertEquals(BlocklistParser.Kind.PATTERN, safe?.kind)
+        assertEquals(listOf("*.doubleclick.net"), safe?.values)
+
+        assertNull(BlocklistParser.parseLine("||*^"))
+        assertNull(BlocklistParser.parseLine("||*.com^"))
     }
 
     @Test

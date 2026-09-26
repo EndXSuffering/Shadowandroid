@@ -110,11 +110,19 @@ under the false-positive rate of the lists themselves, and the user's allowlist 
 without any lookup. Because this firewall sees the destination address of every connection, it
 enforces those directly — the one part of a list that DNS-over-HTTPS cannot route around.
 
+**Wildcard rules.** Ad networks spread a rotating pool of hostnames behind a single rule —
+`||ads-*.v.ssp.yahoo.com^` is how Yahoo serves a good part of its inventory — specifically so
+that blocking one name achieves nothing. These cannot live in a hash set, so they are kept as
+patterns and checked after it misses. A pattern needs enough literal text to be trusted: `*.com`
+and `*ads*` are refused rather than approximated, because a wildcard is only as safe as the
+parts of it that are not wildcards. The same applies to wildcard *exceptions*, so a referral
+allowlist entry like `click*.taobao.com` is honoured too.
+
 **What is not imported.** Rules that cannot be honoured at this level are dropped rather than
-approximated: regular expressions, cosmetic rules, partial wildcards like
-`ad-host-*.example.com`, path rules such as `||example.com/ads/banner.png`, and rules carrying
-modifiers that narrow them (`$denyallow`, `$client`, `$dnstype`). Blocking the whole host for a
-path rule would take down the site. In practice this drops well under 1% of a typical list.
+approximated: regular expressions, cosmetic rules, path rules such as
+`||example.com/ads/banner.png`, wildcards too broad to be safe, and rules carrying modifiers
+that narrow them (`$denyallow`, `$client`, `$dnstype`). Blocking the whole host for a path rule
+would take down the site. In practice this drops well under 1% of a typical list.
 
 Every list can be switched off individually, the whole feature has a master switch, and
 refreshes can be limited to Wi‑Fi or set to manual only.
@@ -200,7 +208,14 @@ Worth knowing before you rely on it:
   the known DoH bootstrap names so lookups fall back to a form that can be filtered. It stands
   down automatically if you pinned a specific Private DNS server, because there is no
   cleartext fallback in that mode and blocking it would leave you with no DNS at all. A client
-  with hard-coded provider addresses still gets through.
+  with hard-coded provider addresses still gets through. The same setting also refuses DNS over
+  TCP, which a resolver falls back to whenever a UDP answer comes back truncated: only UDP:53 is
+  inspected, so leaving TCP open meant a domain rule applied or not depending on how large the
+  answer happened to be. Refusing it sends the resolver back to UDP, where the query is readable.
+- **A blocked page can keep loading for a while.** Domain rules are enforced when a name is
+  looked up, so anything already resolved stays reachable until its DNS entry expires — both
+  Android and the app itself cache. Switching a list on does not retroactively cut existing
+  connections, and a site you had open may keep showing ads for minutes afterwards.
 - **Blocklists are third-party data.** They are maintained by other people and occasionally
   block something you wanted. The allowed-domains list overrides any of them.
 - **MMS may need the messaging app to skip the firewall.** Picture messages are often carried
@@ -408,6 +423,7 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 | `core/…/PacketFactory.kt` | Builds the packets sent back to apps, and all checksums |
 | `core/…/Rules.kt` | The verdict logic |
 | `core/…/DomainHashSet.kt` | Sorted-hash domain set, the memory trick that makes big lists viable |
+| `core/…/DomainPatternSet.kt` | Wildcard rules, matched after the hash sets miss |
 | `core/…/BlocklistParser.kt` | Reads hosts, AdGuard and plain-domain list formats |
 | `app/…/rules/BlocklistRepository.kt` | Downloads, caches and loads the subscribed lists |
 | `core/…/Dns.kt` | Query/response parsing and NXDOMAIN synthesis |
@@ -420,10 +436,10 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 
 ## Testing status
 
-`core/` has 134 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
+`core/` has 154 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
 wrapping, RST generation, DNS parsing (including compression-pointer loops and truncated
 input), suffix matching, cache expiry, blocklist parsing across all three formats, the
-hash-set index, and the SOCKS5 client — including replies split across reads, a refusal, and
+hash-set index, wildcard patterns (including the ones refused for being too broad), and the SOCKS5 client — including replies split across reads, a refusal, and
 server bytes arriving in the same read as the proxy's reply. Run them with
 `./gradlew :core:test`.
 

@@ -82,6 +82,9 @@ class TunnelRelay(
     @Volatile var dnsQueriesBlocked: Long = 0; private set
     @Volatile var encryptedDnsRefused: Long = 0; private set
 
+    /** DNS connections over TCP we sent back to UDP so the query could be inspected. */
+    @Volatile var tcpDnsRefused: Long = 0; private set
+
     /** Connections handed to Tor, so the UI can say whether routing is doing anything. */
     @Volatile var torFlows: Long = 0; private set
 
@@ -150,6 +153,18 @@ class TunnelRelay(
             encryptedDnsRefused++
             sink.write(PacketFactory.buildRstFor(segment))
             logEncryptedDnsRefusal(key, packet, segment.sourcePort, segment.destinationPort)
+            return
+        }
+
+        // DNS over TCP was a hole rather than a feature. A resolver falls back to TCP whenever
+        // a UDP answer comes back truncated, and only UDP:53 is inspected here — so a domain
+        // rule applied or not depending on how large the answer happened to be, which reads as
+        // the firewall working intermittently. Refusing the connection sends the resolver back
+        // to UDP, where the query can be read. Truncation is a property of the response, so a
+        // UDP attempt always exists to fall back to.
+        if (segment.isSyn && shouldRefuseTcpDns(segment.destinationPort)) {
+            tcpDnsRefused++
+            sink.write(PacketFactory.buildRstFor(segment))
             return
         }
 
@@ -305,6 +320,14 @@ class TunnelRelay(
         EncryptedDns.isEncryptedTransportPort(destinationPort) &&
             ruleEngine.rules.blockEncryptedDns &&
             networkMonitor.strictPrivateDnsHostname == null
+
+    /**
+     * Whether to refuse a DNS connection over TCP so the resolver retries over UDP, where the
+     * query is readable. Gated on the same setting as the encrypted transports, since it is
+     * the same bargain: give up a transport to keep lookups filterable.
+     */
+    private fun shouldRefuseTcpDns(destinationPort: Int): Boolean =
+        destinationPort == Dns.PORT && ruleEngine.rules.blockEncryptedDns
 
     private fun logEncryptedDnsRefusal(
         key: FlowKey,

@@ -20,11 +20,25 @@ class Blocklist(
      * subscribed list rather than only to its own entries.
      */
     val isAllowlist: Boolean = false,
+    /** Wildcard rules, consulted only after [blocked] has missed. */
+    val blockedPatterns: DomainPatternSet = DomainPatternSet.EMPTY,
+    val allowedPatterns: DomainPatternSet = DomainPatternSet.EMPTY,
 ) {
-    val size: Int get() = if (isAllowlist) allowed.size else blocked.size + blockedAddresses.size
+    val size: Int
+        get() = if (isAllowlist) {
+            allowed.size + allowedPatterns.size
+        } else {
+            blocked.size + blockedAddresses.size + blockedPatterns.size
+        }
 
-    fun blocks(host: String): Boolean =
-        blocked.contains(host) && !allowed.contains(host)
+    fun blocks(host: String): Boolean {
+        if (exempts(host)) return false
+        return blocked.contains(host) || blockedPatterns.contains(host)
+    }
+
+    /** This list's own exceptions, which win over its own entries. */
+    fun exempts(host: String): Boolean =
+        allowed.contains(host) || allowedPatterns.contains(host)
 
     /**
      * Matches a destination IP against the list's address rules. Unlike [blocks] this needs
@@ -43,8 +57,7 @@ class Blocklist(
  */
 class BlocklistIndex(val lists: List<Blocklist>) {
 
-    private val allowlists: List<DomainHashSet> =
-        lists.filter { it.isAllowlist }.map { it.allowed }.filter { !it.isEmpty }
+    private val allowlists: List<Blocklist> = lists.filter { it.isAllowlist }
 
     private val blocklists: List<Blocklist> = lists.filter { !it.isAllowlist }
 
@@ -61,7 +74,7 @@ class BlocklistIndex(val lists: List<Blocklist>) {
      */
     fun isExempt(host: String): Boolean {
         for (allowlist in allowlists) {
-            if (allowlist.contains(host)) return true
+            if (allowlist.exempts(host)) return true
         }
         return false
     }
