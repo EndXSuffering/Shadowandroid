@@ -32,6 +32,7 @@
     <string name="bypass_badge">Skipping firewall</string>
     <string name="bypass_active_warning">No rules apply to this app while it is skipping the firewall, and its connections will not appear in the traffic log.</string>
     <string name="bypass_sms_hint">This is your messaging app. Picture messages often travel on a separate carrier connection that the firewall cannot carry, so skipping the firewall here is the usual fix for MMS.</string>
+    <string name="bypass_payments_hint">Payment apps run their own fraud checks, and some refuse service whenever a VPN is on — even this one, which never sends your traffic anywhere else. If this app shows an error, says it is not available, or will not let you sign in while the firewall is on, skip the firewall here. Its traffic then goes out exactly as it does with the firewall off, while every other app stays filtered.</string>
     <string name="bypass_car_hint">This app talks to your car over USB or its own Wi‑Fi link rather than your normal connection, so a firewall sitting in the middle can stop it pairing or drop it mid-drive. If Android Auto misbehaves while the firewall is on, skip the firewall here first. Google Play services helps set up that connection, so it may need skipping too — search for it with System apps turned on.</string>
 
     <string name="tor_title">Route through Tor</string>
@@ -49,6 +50,7 @@
     <string name="route_tor">Through Tor</string>
     <string name="shared_uid_summary">%1$s + %2$d more sharing this user ID</string>
     <string name="messaging_app_marker">Your messaging app — tap for the MMS fix</string>
+    <string name="payments_app_marker">Payments — tap if it refuses to work while the firewall is on</string>
     <string name="car_app_marker">Car projection — tap if Android Auto stops connecting</string>
 
     <string name="filter_all">All</string>

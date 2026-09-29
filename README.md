@@ -241,6 +241,12 @@ Worth knowing before you rely on it:
   firewall* for it, and if that is not enough, for Google Play services too, which brokers the
   connection. Apps that merely *appear* on the car screen — maps, music, podcasts — run on the
   phone over ordinary connections and keep being filtered normally.
+- **Some payment apps refuse to work while any VPN is on.** They run their own fraud checks,
+  and some treat a VPN as a warning sign even when, as here, it never takes traffic off the
+  phone. PayPal is one: it answered "this beta is not available for your account" only while
+  the tunnel was up, with every one of its connections allowed. Such apps are pinned to the top
+  of the list and marked; *Skip the firewall* sends their traffic out as if the firewall were
+  off, while everything else stays filtered.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN. That
   includes Orbot's own VPN mode — which is why Tor routing here talks to Orbot's SOCKS proxy
   instead, and why Orbot should be left in proxy mode rather than "VPN mode" while this app is

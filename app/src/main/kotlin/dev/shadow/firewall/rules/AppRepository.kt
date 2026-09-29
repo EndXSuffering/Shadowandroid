@@ -25,6 +25,13 @@ enum class TunnelTrouble {
 
     /** Car projection talks to the head unit over its own link, not the default network. */
     CAR_PROJECTION,
+
+    /**
+     * Payment apps run their own fraud checks, and some refuse service whenever a VPN is
+     * active — even one like this, which never takes traffic off the phone. Reported with
+     * PayPal, which answered "not available for your account" only while the tunnel was up.
+     */
+    PAYMENTS,
 }
 
 /**
@@ -106,6 +113,7 @@ class AppRepository(context: Context) {
     private fun troubleFor(names: List<String>): TunnelTrouble? = when {
         names.any { it == defaultSmsPackage } -> TunnelTrouble.MESSAGING
         names.any { it in CAR_PROJECTION_PACKAGES } -> TunnelTrouble.CAR_PROJECTION
+        names.any { it in PAYMENT_PACKAGES } -> TunnelTrouble.PAYMENTS
         else -> null
     }
 
@@ -182,6 +190,15 @@ class AppRepository(context: Context) {
         val CAR_PROJECTION_PACKAGES = setOf(
             "com.google.android.projection.gearhead",
             "com.samsung.android.drivelink.stub",
+        )
+
+        /**
+         * Payment apps seen to refuse service while the tunnel is up. Only apps with a report
+         * behind them go here: listing a bank on a guess would put it at the top of everyone's
+         * list and suggest excluding it for no reason.
+         */
+        val PAYMENT_PACKAGES = setOf(
+            "com.paypal.android.p2pmobile",
         )
     }
 }

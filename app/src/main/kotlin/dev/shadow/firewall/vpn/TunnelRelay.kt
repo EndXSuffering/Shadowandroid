@@ -66,6 +66,16 @@ class TunnelRelay(
     /** Blocked flows we have already logged, so a retrying app does not flood the log. */
     private val recentlyBlocked = ConcurrentHashMap<FlowKey, Long>()
 
+    /**
+     * Blocked lookups we have already logged, by name.
+     *
+     * Kept apart from [recentlyBlocked] because a lookup's flow key cannot tell names apart:
+     * every query goes from the tunnel address to the same resolver on port 53, so keying on
+     * it throttled *all* blocked lookups together. One got logged per interval and the rest
+     * vanished, which left the log unable to show what an app was actually being refused.
+     */
+    private val recentlyBlockedNames = ConcurrentHashMap<String, Long>()
+
     private var readerThread: Thread? = null
     private var sweeperThread: Thread? = null
 
@@ -443,8 +453,8 @@ class TunnelRelay(
         decision: Decision,
     ) {
         flowsBlocked++
-        val lookupKey = key.copy(sourcePort = 0) // one entry per domain, not per query socket
-        if (!shouldLogBlock(lookupKey)) return
+        // One entry per name per interval, however many queries or resolvers ask for it.
+        if (!shouldLog(recentlyBlockedNames, RuleEngine.normalise(name))) return
 
         val uid = uidResolver.resolve(
             key,
@@ -476,11 +486,13 @@ class TunnelRelay(
     }
 
     /** Rate-limits log entries for a flow the user has already been told about. */
-    private fun shouldLogBlock(key: FlowKey): Boolean {
+    private fun shouldLogBlock(key: FlowKey): Boolean = shouldLog(recentlyBlocked, key)
+
+    private fun <K : Any> shouldLog(seen: ConcurrentHashMap<K, Long>, key: K): Boolean {
         val now = System.currentTimeMillis()
-        val previous = recentlyBlocked[key]
+        val previous = seen[key]
         if (previous != null && now - previous < BLOCK_LOG_INTERVAL_MILLIS) return false
-        recentlyBlocked[key] = now
+        seen[key] = now
         return true
     }
 
@@ -507,6 +519,7 @@ class TunnelRelay(
                 if (now - flow.lastActivityMillis > limit) flow.close()
             }
             recentlyBlocked.entries.removeAll { now - it.value > BLOCK_LOG_INTERVAL_MILLIS * 2 }
+            recentlyBlockedNames.entries.removeAll { now - it.value > BLOCK_LOG_INTERVAL_MILLIS * 2 }
         }
     }
 

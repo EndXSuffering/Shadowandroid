@@ -234,12 +234,14 @@ private fun AppDetailDialog(
 private fun markerFor(trouble: TunnelTrouble): Int = when (trouble) {
     TunnelTrouble.MESSAGING -> R.string.messaging_app_marker
     TunnelTrouble.CAR_PROJECTION -> R.string.car_app_marker
+    TunnelTrouble.PAYMENTS -> R.string.payments_app_marker
 }
 
 /** The fuller explanation in the dialog, once they have opened the app they were looking for. */
 private fun hintFor(trouble: TunnelTrouble): Int = when (trouble) {
     TunnelTrouble.MESSAGING -> R.string.bypass_sms_hint
     TunnelTrouble.CAR_PROJECTION -> R.string.bypass_car_hint
+    TunnelTrouble.PAYMENTS -> R.string.bypass_payments_hint
 }
 
 @Composable
