@@ -124,6 +124,15 @@ approximated: regular expressions, cosmetic rules, path rules such as
 that narrow them (`$denyallow`, `$client`, `$dnstype`). Blocking the whole host for a path rule
 would take down the site. In practice this drops well under 1% of a typical list.
 
+**Rules the app adds for you.** A few fixes are right for almost everyone but belong to no
+list, so the app writes them into your own *Blocked domains* and *Allowed domains* once, where
+you can see and delete them like anything you typed. Currently: the three hosts behind Yahoo
+Mail's inbox ads (`gam.mail.yahoosandbox.net`, `pbs.yahoo.com`, `pbd.yahoo.com`) are blocked,
+and PayPal's bot check (`bm.paypal.com`, `validate.perfdrive.com`) is allowed — tracker lists
+block it because it fingerprints the device, but without it PayPal cannot tell you from a
+script and login fails. Each batch is applied exactly once: delete a seeded domain and it stays
+deleted, and a seed never overrides a domain you have explicitly put in the opposite list.
+
 Every list can be switched off individually, the whole feature has a master switch, and
 refreshes can be limited to Wi‑Fi or set to manual only.
 
@@ -436,7 +445,7 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 
 ## Testing status
 
-`core/` has 154 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
+`core/` has 163 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
 wrapping, RST generation, DNS parsing (including compression-pointer loops and truncated
 input), suffix matching, cache expiry, blocklist parsing across all three formats, the
 hash-set index, wildcard patterns (including the ones refused for being too broad), and the SOCKS5 client — including replies split across reads, a refusal, and

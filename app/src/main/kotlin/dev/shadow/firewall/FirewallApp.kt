@@ -33,6 +33,10 @@ class FirewallApp : Application() {
     override fun onCreate() {
         super.onCreate()
         scope.launch {
+            // Before anything else reads the rules: a fix shipped as a seeded domain should
+            // be in place by the time the tunnel asks for its first verdict. A no-op once
+            // every release has been applied.
+            ruleStore.applySeededRules()
             // Load whatever is already cached before anything asks for a verdict, then make
             // sure the periodic refresh matches the user's current preference.
             blocklistRepository.load()

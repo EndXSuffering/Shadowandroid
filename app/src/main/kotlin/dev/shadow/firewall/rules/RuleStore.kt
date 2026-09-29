@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dev.shadow.firewall.core.AppRule
 import dev.shadow.firewall.core.RuleEngine
 import dev.shadow.firewall.core.RuleSet
+import dev.shadow.firewall.core.SeededRules
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -40,6 +41,11 @@ private data class StoredRules(
     val trackerProtection: String = TrackerProtection.BALANCED.name,
     val updateOnUnmeteredOnly: Boolean = true,
     val blocklistMetadata: Map<String, BlocklistMetadata> = emptyMap(),
+    /**
+     * How many releases of [SeededRules] have been written into the domain lists. Stored so
+     * each is applied once: a seeded domain the user deletes must stay deleted.
+     */
+    val seededRulesVersion: Int = 0,
 )
 
 /** Per-list download bookkeeping, so a refresh can be conditional and failures are visible. */
@@ -95,8 +101,29 @@ class RuleStore(private val context: Context) {
     }
 
     suspend fun update(transform: (FirewallSettings) -> FirewallSettings) = editStored { stored ->
-        // Metadata is not part of FirewallSettings, so carry it across untouched.
-        transform(stored.toSettings()).toStored().copy(blocklistMetadata = stored.blocklistMetadata)
+        // Neither of these is part of FirewallSettings, so carry them across untouched. The
+        // seed version matters most: dropping it would re-seed on the next launch and put
+        // back every seeded domain the user had deleted.
+        transform(stored.toSettings()).toStored().copy(
+            blocklistMetadata = stored.blocklistMetadata,
+            seededRulesVersion = stored.seededRulesVersion,
+        )
+    }
+
+    /**
+     * Writes any [SeededRules] releases not yet applied into the user's domain lists. Safe to
+     * call on every launch; it does nothing once the latest release is in.
+     */
+    suspend fun applySeededRules() = editStored { stored ->
+        if (stored.seededRulesVersion >= SeededRules.LATEST) return@editStored stored
+        val blocked = RuleEngine.normaliseAll(stored.blockedDomains)
+        val allowed = RuleEngine.normaliseAll(stored.allowedDomains)
+        val result = SeededRules.apply(blocked, allowed, stored.seededRulesVersion)
+        stored.copy(
+            blockedDomains = result.blocked.sorted(),
+            allowedDomains = result.allowed.sorted(),
+            seededRulesVersion = result.version,
+        )
     }
 
     /** Reads, transforms and writes the stored document under the DataStore lock. */
