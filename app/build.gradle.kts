@@ -46,6 +46,12 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    testOptions {
+        // Local unit tests run on the desktop JVM, where every android.jar method throws.
+        // Defaults instead let plain relay logic that merely logs be tested there.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -69,4 +75,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
     debugImplementation(libs.compose.ui.tooling)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlin.test.junit)
 }

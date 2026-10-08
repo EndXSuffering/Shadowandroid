@@ -12,6 +12,7 @@ import dev.shadow.firewall.core.RuleEngine
 import dev.shadow.firewall.core.RuleSet
 import dev.shadow.firewall.core.SeededRules
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -95,10 +96,15 @@ class RuleStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    /**
+     * Only emits when a setting actually changes. Download bookkeeping lives in the same stored
+     * document, so without this every list download looked like a settings change to the
+     * tunnel, which re-resolved package uids and re-checked the interface shape each time.
+     */
     val settings: Flow<FirewallSettings> = context.dataStore.data.map { preferences ->
         val raw = preferences[KEY_RULES] ?: return@map FirewallSettings()
         decode(raw)?.toSettings() ?: FirewallSettings()
-    }
+    }.distinctUntilChanged()
 
     suspend fun update(transform: (FirewallSettings) -> FirewallSettings) = editStored { stored ->
         // Neither of these is part of FirewallSettings, so carry them across untouched. The

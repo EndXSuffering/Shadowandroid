@@ -251,7 +251,14 @@ class TunnelRelay(
             udpFlows.remove(key, existing)
         }
 
-        val decision = judge(key, packet, datagram.sourcePort, datagram.destinationPort, IpProto.UDP)
+        val decision = judge(
+            key, packet, datagram.sourcePort, datagram.destinationPort, IpProto.UDP,
+            // An allowed lookup's row says only "1.1.1.1:53": the name it asked for is not
+            // on it, and the connection that follows carries that name anyway. With a query
+            // per lookup they made up half the log and pushed real connections out of its
+            // thousand slots. A *blocked* lookup is still logged, by interceptDnsQuery.
+            logAllowed = datagram.destinationPort != UdpFlow.DNS_PORT,
+        )
         if (decision.isBlocked) return // silently dropped; UDP senders expect loss
 
         val eventId = decision.eventId
@@ -301,10 +308,29 @@ class TunnelRelay(
         // on shared hosting, where one address serves both a tracker and something wanted.
         val decision = ruleEngine.decideHostname(name)
         if (!decision.isBlocked) return false
-        dnsQueriesBlocked++
 
+        // A query we cannot mirror is forwarded instead, so it is only counted once refused.
         val reply = Dns.buildNxDomain(packet.data, datagram.payloadOffset, datagram.payloadLength)
             ?: return false
+        dnsQueriesBlocked++
+        flowsBlocked++
+
+        // Ask who sent the query *before* answering it. The resolver's socket only lives until
+        // its reply arrives, so looking it up afterwards lost the race often enough that most
+        // blocked lookups were logged as "unattributed" — while the allowed lookups from the
+        // same app, resolved before forwarding, were named correctly. Only done when the
+        // entry will actually be logged, since it costs a call into the system.
+        val uid = if (shouldLog(recentlyBlockedNames, RuleEngine.normalise(name))) {
+            uidResolver.resolve(
+                key,
+                packet.sourceAddress,
+                datagram.sourcePort,
+                packet.destinationAddress,
+                datagram.destinationPort,
+            )
+        } else {
+            null
+        }
 
         sink.write(
             PacketFactory.buildUdp(
@@ -316,7 +342,7 @@ class TunnelRelay(
             ),
         )
 
-        logBlockedLookup(key, packet, datagram, name, decision)
+        if (uid != null) logBlockedLookup(key, datagram, name, decision, uid)
         return true
     }
 
@@ -386,6 +412,8 @@ class TunnelRelay(
         sourcePort: Int,
         destinationPort: Int,
         protocol: Int,
+        /** False to keep an allowed flow out of the log; a blocked one is always logged. */
+        logAllowed: Boolean = true,
     ): Judgement {
         val uid = uidResolver.resolve(
             key,
@@ -418,6 +446,8 @@ class TunnelRelay(
         } else {
             flowsAllowed++
             if (viaTor) torFlows++
+            // Event id 0 matches no log entry, so byte updates for this flow are ignored.
+            if (!logAllowed) return Judgement(false, 0, viaTor)
         }
 
         val identity = identify(uid)
@@ -445,24 +475,17 @@ class TunnelRelay(
         return Judgement(decision.isBlocked, eventId, viaTor)
     }
 
+    /**
+     * Records a refused lookup. The caller has already counted it, applied the per-name rate
+     * limit, and resolved [uid] while the asking socket still existed.
+     */
     private fun logBlockedLookup(
         key: FlowKey,
-        packet: IpPacket,
         datagram: UdpDatagram,
         name: String,
         decision: Decision,
+        uid: Int,
     ) {
-        flowsBlocked++
-        // One entry per name per interval, however many queries or resolvers ask for it.
-        if (!shouldLog(recentlyBlockedNames, RuleEngine.normalise(name))) return
-
-        val uid = uidResolver.resolve(
-            key,
-            packet.sourceAddress,
-            datagram.sourcePort,
-            packet.destinationAddress,
-            datagram.destinationPort,
-        )
         val identity = identify(uid)
         val now = System.currentTimeMillis()
         onEvent(
@@ -546,7 +569,19 @@ class TunnelRelay(
         const val MAX_DATAGRAM = 65535
 
         const val SWEEP_INTERVAL_MILLIS = 10_000L
-        const val TCP_IDLE_MILLIS = 5 * 60_000L
+
+        /**
+         * How long an established TCP connection may sit silent before it is reset.
+         *
+         * This used to be five minutes, which is far shorter than the connections it was
+         * cutting. Push messaging — Google's notification channel, RCS, chat apps — holds one
+         * socket open and sends a heartbeat every ten to thirty minutes, so every one of them
+         * was being reset between heartbeats: notifications arrived late, and each reconnect
+         * cost battery. A connection whose app or server has really gone away ends with a FIN
+         * or a reset anyway; this only collects the rare one that vanishes without either. An
+         * hour matches what other on-device firewalls use.
+         */
+        const val TCP_IDLE_MILLIS = 60 * 60_000L
         const val UDP_IDLE_MILLIS = 60_000L
         const val DNS_IDLE_MILLIS = 15_000L
         const val BLOCK_LOG_INTERVAL_MILLIS = 30_000L

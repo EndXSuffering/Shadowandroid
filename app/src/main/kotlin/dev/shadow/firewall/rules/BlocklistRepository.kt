@@ -11,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -64,6 +66,9 @@ class BlocklistRepository(
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    /** One refresh at a time; later requests queue behind it rather than being dropped. */
+    private val refreshMutex = Mutex()
+
     // -------------------------------------------------------------- loading
 
     /** Reads the cached indexes from disk into memory. Safe to call repeatedly. */
@@ -116,27 +121,37 @@ class BlocklistRepository(
      * @return true when every enabled list ended up with usable data.
      */
     suspend fun refresh(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        if (_refreshing.value) return@withContext false
-        _refreshing.value = true
-        try {
-            val state = store.blocklistState()
-            var allSucceeded = true
-
-            for (source in BlocklistCatalog.sources) {
-                if (source.id !in state.enabledIds) continue
-                val meta = state.metadata[source.id]
-                val cached = indexFile(source.id).exists()
-                if (!force && cached && !isStale(meta?.updatedAtMillis ?: 0, state.frequency)) continue
-
-                val ok = downloadOne(source, if (force) null else meta)
-                if (!ok && !cached) allSucceeded = false
+        // A request that arrives mid-refresh waits its turn and then makes its own pass. It
+        // used to return at once, which threw the request away: switch a list on while
+        // another download was running — easy right after changing the tracker level — and
+        // that list sat at "not downloaded yet" until the next scheduled run. A queued pass
+        // is cheap, since whatever the first one just fetched is fresh and gets skipped.
+        refreshMutex.withLock {
+            _refreshing.value = true
+            try {
+                refreshOnce(force)
+            } finally {
+                _refreshing.value = false
             }
-
-            load()
-            allSucceeded
-        } finally {
-            _refreshing.value = false
         }
+    }
+
+    private suspend fun refreshOnce(force: Boolean): Boolean {
+        val state = store.blocklistState()
+        var allSucceeded = true
+
+        for (source in BlocklistCatalog.sources) {
+            if (source.id !in state.enabledIds) continue
+            val meta = state.metadata[source.id]
+            val cached = indexFile(source.id).exists()
+            if (!force && cached && !isStale(meta?.updatedAtMillis ?: 0, state.frequency)) continue
+
+            val ok = downloadOne(source, if (force) null else meta)
+            if (!ok && !cached) allSucceeded = false
+        }
+
+        load()
+        return allSucceeded
     }
 
     private fun isStale(updatedAtMillis: Long, frequency: UpdateFrequency): Boolean {

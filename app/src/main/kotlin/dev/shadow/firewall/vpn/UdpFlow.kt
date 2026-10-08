@@ -94,20 +94,23 @@ class UdpFlow(
     @Synchronized
     override fun onSelected(key: SelectionKey) {
         if (closed) return
-        val buffer = ByteBuffer.allocate(maxDatagram)
+        // One buffer per thread, not per wakeup. This used to allocate a fresh 64 KB buffer
+        // every time a socket became readable — hundreds of times a second during a video
+        // call or a QUIC download — only to throw it away.
+        val buffer = receiveBuffer.get()!!
         try {
             while (true) {
                 buffer.clear()
+                buffer.limit(minOf(maxDatagram, buffer.capacity()))
                 val read = channel.read(buffer)
                 if (read <= 0) return
-                buffer.flip()
-                val payload = ByteArray(read)
-                buffer.get(payload)
 
                 lastActivityMillis = System.currentTimeMillis()
                 bytesReceived += read
                 onBytes(bytesSent, bytesReceived)
-                onResponse(this, payload)
+                // Only DNS replies are inspected, and only they need a copy of their own; the
+                // packet built below copies the bytes out of the shared buffer itself.
+                if (isDns) onResponse(this, buffer.array().copyOf(read))
 
                 sink.write(
                     PacketFactory.buildUdp(
@@ -115,7 +118,8 @@ class UdpFlow(
                         sourcePort = remotePort,
                         destination = appAddress,
                         destinationPort = appPort,
-                        payload = payload,
+                        payload = buffer.array(),
+                        payloadLength = read,
                     ),
                 )
             }
@@ -140,5 +144,9 @@ class UdpFlow(
     companion object {
         const val DNS_PORT = 53
         private const val TAG = "UdpFlow"
+
+        /** Big enough for the largest UDP payload; reads only happen on the selector thread. */
+        private val receiveBuffer: ThreadLocal<ByteBuffer> =
+            ThreadLocal.withInitial { ByteBuffer.allocate(65_535) }
     }
 }

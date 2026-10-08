@@ -411,17 +411,21 @@ class TcpFlow(
                 return
             }
 
-            val buffer = ByteBuffer.allocate(minOf(segmentSize, allowance))
+            // Reads land in one buffer per thread and go straight into the outgoing packet,
+            // which copies them. This is the path every downloaded byte takes; allocating two
+            // throwaway arrays per segment here was garbage the collector had to chase at
+            // line rate.
+            val buffer = readBuffer.get()!!
+            buffer.clear()
+            buffer.limit(minOf(segmentSize, allowance, buffer.capacity()))
             val read = channel.read(buffer)
             when {
                 read > 0 -> {
-                    buffer.flip()
-                    val payload = ByteArray(read)
-                    buffer.get(payload)
                     emit(
                         flags = TcpFlags.PSH or TcpFlags.ACK,
                         sequenceNumber = sendNext,
-                        payload = payload,
+                        payload = buffer.array(),
+                        payloadLength = read,
                     )
                     sendNext = PacketFactory.nextSequence(sendNext, read)
                     bytesReceived += read
@@ -465,6 +469,8 @@ class TcpFlow(
         flags: Int,
         sequenceNumber: Long,
         payload: ByteArray? = null,
+        /** How much of [payload] to send, from its start; it may be a reused, larger buffer. */
+        payloadLength: Int = payload?.size ?: 0,
         mss: Int? = null,
     ) {
         sink.write(
@@ -480,6 +486,7 @@ class TcpFlow(
                 // so a slow server throttles the app instead of growing our queue.
                 window = (DEFAULT_WINDOW - pendingBytes).coerceIn(0, DEFAULT_WINDOW),
                 payload = payload,
+                payloadLength = payloadLength,
                 mssOption = mss,
             ),
         )
@@ -518,6 +525,13 @@ class TcpFlow(
 
         /** A SOCKS reply is at most 262 bytes; this leaves room for it and then some. */
         const val PROXY_BUFFER = 512
+
+        /**
+         * Large enough for any segment this tunnel's MTU allows. Per thread rather than per
+         * flow: reads only happen on the selector thread, and a buffer per flow would cost
+         * memory for every idle connection on the phone.
+         */
+        val readBuffer: ThreadLocal<ByteBuffer> = ThreadLocal.withInitial { ByteBuffer.allocate(65_535) }
 
         const val DIRECT_HANDSHAKE_MILLIS = 30_000L
 

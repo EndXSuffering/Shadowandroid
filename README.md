@@ -247,6 +247,12 @@ Worth knowing before you rely on it:
   the tunnel was up, with every one of its connections allowed. Such apps are pinned to the top
   of the list and marked; *Skip the firewall* sends their traffic out as if the firewall were
   off, while everything else stays filtered.
+- **DNS goes to Cloudflare and Quad9, not your network's resolver.** The tunnel advertises
+  `1.1.1.1` and `9.9.9.9` to apps. Its DNS servers are fixed when it starts, and a router address
+  from home Wi-Fi stops answering the moment the phone moves to mobile data; a public resolver
+  works on any network. The trade is that those two providers see your lookups rather than your
+  ISP, and a hotel or airport sign-in page that only answers its own DNS may not load — sign in
+  with the firewall stopped, then start it again.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN. That
   includes Orbot's own VPN mode — which is why Tor routing here talks to Orbot's SOCKS proxy
   instead, and why Orbot should be left in proxy mode rather than "VPN mode" while this app is
@@ -462,5 +468,10 @@ The parser was also run over the real lists it ships with — 464,000 rules acro
 to check the extraction rate and confirm that none of twenty popular domains (google.com,
 github.com, wikipedia.org and so on) came out blocked.
 
-The `app/` module has no automated tests yet. The relay's behaviour under real traffic —
-handshakes, flow control, teardown — has not been exercised against a device.
+`app/` has unit tests for the two pieces of the relay that can run off-device: the writer that
+hands packets to the tun device, and the traffic log. The writer's tests pin the property the
+TCP relay depends on — nothing handed to it is dropped, a full queue makes the sender wait, and
+neither stopping the tunnel nor a dead file descriptor can leave a sender stuck. Run them with
+`./gradlew :app:testDebugUnitTest`; CI runs both test suites on every push. The rest of the
+relay's behaviour under real traffic — handshakes, flow control, teardown — has not been
+exercised against a device.

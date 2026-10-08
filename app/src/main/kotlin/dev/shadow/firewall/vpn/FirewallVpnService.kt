@@ -31,7 +31,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.Inet4Address
 import java.nio.channels.DatagramChannel
 import java.nio.channels.SocketChannel
 
@@ -208,9 +207,9 @@ class FirewallVpnService : VpnService() {
         }
 
         for (server in monitor.tunnelDnsServers(includeIpv6 = !blockIpv6)) {
-            // Advertising the real resolvers keeps DNS working; the queries still come
-            // through the tunnel, where the domain rules are applied.
-            if (blockIpv6 && server !is Inet4Address) continue
+            // Public resolvers, chosen deliberately — see tunnelDnsServers for why not the
+            // network's own. Queries to them still come through the tunnel, where the domain
+            // rules are applied.
             runCatching { builder.addDnsServer(server) }
         }
 

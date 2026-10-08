@@ -21,8 +21,17 @@ class UidResolver(private val connectivityManager: ConnectivityManager) {
     /** Returned when the socket is gone or the lookup is not permitted. */
     val unknownUid: Int = Process.INVALID_UID
 
-    private val cache = object : LinkedHashMap<FlowKey, Int>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<FlowKey, Int>): Boolean =
+    private class Entry(val uid: Int, val atMillis: Long)
+
+    /**
+     * Short-lived on purpose. It exists to absorb an app retrying the same connection — a
+     * blocked SYN comes back several times in a second — not to remember owners. Ports are
+     * reused: DNS alone draws from about 28,000 of them, and entries for blocked flows are
+     * never explicitly forgotten, so a long-lived cache handed a new connection the *previous*
+     * owner of its port, and the log named the wrong app.
+     */
+    private val cache = object : LinkedHashMap<FlowKey, Entry>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<FlowKey, Entry>): Boolean =
             size > MAX_ENTRIES
     }
 
@@ -38,7 +47,11 @@ class UidResolver(private val connectivityManager: ConnectivityManager) {
         destination: InetAddress,
         destinationPort: Int,
     ): Int {
-        cache[key]?.let { return it }
+        val now = System.currentTimeMillis()
+        cache[key]?.let { entry ->
+            if (now - entry.atMillis < CACHE_TTL_MILLIS) return entry.uid
+            cache.remove(key)
+        }
 
         // A first miss is usually a race: we ask as the flow is being set up, and the socket
         // may not be in the kernel's table for another moment. One retry costs a syscall and
@@ -50,7 +63,7 @@ class UidResolver(private val connectivityManager: ConnectivityManager) {
         }
 
         // Only cache a definite answer; an unknown one may resolve on a later flow.
-        if (uid != unknownUid) cache[key] = uid
+        if (uid != unknownUid) cache[key] = Entry(uid, now)
         return uid
     }
 
@@ -88,5 +101,6 @@ class UidResolver(private val connectivityManager: ConnectivityManager) {
     private companion object {
         const val TAG = "UidResolver"
         const val MAX_ENTRIES = 2048
+        const val CACHE_TTL_MILLIS = 10_000L
     }
 }

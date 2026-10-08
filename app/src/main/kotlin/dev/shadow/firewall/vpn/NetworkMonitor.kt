@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Tracks which kind of network is underneath the tunnel, so "block on mobile data" can mean
- * something, and collects the DNS servers the tunnel should advertise.
+ * something, and whether the user pinned a Private DNS server.
  *
  * The VPN's own network is skipped: asking the connectivity manager for "the active network"
  * while we are the active VPN would just describe our own tunnel.
@@ -28,10 +28,6 @@ class NetworkMonitor(context: Context) {
     var currentType: NetworkType = NetworkType.OTHER
         private set
 
-    @Volatile
-    var dnsServers: List<InetAddress> = emptyList()
-        private set
-
     /**
      * Set when the user pinned a specific Private DNS hostname ("strict" mode). Android then
      * has no cleartext fallback, so refusing port 853 would leave the device with no DNS at
@@ -43,8 +39,8 @@ class NetworkMonitor(context: Context) {
 
     /** What we currently know about one network the callback has told us about. */
     private class Link(
-        var capabilities: NetworkCapabilities? = null,
-        var linkProperties: LinkProperties? = null,
+        @Volatile var capabilities: NetworkCapabilities? = null,
+        @Volatile var linkProperties: LinkProperties? = null,
     )
 
     // Built up from the callback rather than polled. ConnectivityManager.allNetworks was the
@@ -87,6 +83,33 @@ class NetworkMonitor(context: Context) {
         } catch (error: SecurityException) {
             Log.w(TAG, "cannot register network callback", error)
         }
+        seedFromActiveNetwork()
+    }
+
+    /**
+     * Reads the current network synchronously, before the tunnel carries its first packet.
+     *
+     * The callback above answers asynchronously, and the tunnel used to be established and
+     * judging connections before it had said anything — so every connection in that window
+     * was judged as being on an "other" network. An app blocked only on Wi-Fi got through
+     * for the first moments after every start, and the tunnel restarts whenever a bypass,
+     * Tor or IPv6 setting changes. The default network for this app is the physical one even
+     * while the VPN is up, because the app excludes itself from its own tunnel.
+     */
+    private fun seedFromActiveNetwork() {
+        try {
+            val network = connectivityManager.activeNetwork ?: return
+            val link = links.getOrPut(network) { Link() }
+            if (link.capabilities == null) {
+                link.capabilities = connectivityManager.getNetworkCapabilities(network)
+            }
+            if (link.linkProperties == null) {
+                link.linkProperties = connectivityManager.getLinkProperties(network)
+            }
+            recompute()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "cannot read the active network", error)
+        }
     }
 
     fun stop() {
@@ -97,9 +120,9 @@ class NetworkMonitor(context: Context) {
         links.clear()
     }
 
+    @Synchronized
     private fun recompute() {
         var type = NetworkType.OTHER
-        var servers: List<InetAddress> = emptyList()
         var strictPrivateDns: String? = null
 
         for ((_, link) in links) {
@@ -118,31 +141,34 @@ class NetworkMonitor(context: Context) {
             if (type == NetworkType.WIFI && candidate != NetworkType.WIFI) continue
 
             type = candidate
-            link.linkProperties?.let { properties ->
-                properties.dnsServers.let { if (it.isNotEmpty()) servers = it }
-                // Non-null only in strict mode; opportunistic DoT leaves it unset.
-                properties.privateDnsServerName?.let { strictPrivateDns = it }
-            }
+            // Non-null only in strict mode; opportunistic DoT leaves it unset.
+            link.linkProperties?.privateDnsServerName?.let { strictPrivateDns = it }
             if (type == NetworkType.WIFI) break
         }
 
         currentType = type
-        dnsServers = servers.ifEmpty { FALLBACK_DNS }
         strictPrivateDnsHostname = strictPrivateDns
     }
 
-    /** DNS servers to hand the tunnel, preferring IPv4 when IPv6 is switched off. */
-    fun tunnelDnsServers(includeIpv6: Boolean): List<InetAddress> {
-        val servers = dnsServers.ifEmpty { FALLBACK_DNS }
-        val filtered = if (includeIpv6) servers else servers.filterIsInstance<Inet4Address>()
-        return filtered.ifEmpty { FALLBACK_DNS.filterIsInstance<Inet4Address>() }
-    }
+    /**
+     * The resolvers the tunnel advertises to apps.
+     *
+     * Deliberately public ones, not the network's own. The tunnel's DNS servers are fixed
+     * when it is established, but the network underneath is not: a router address taken from
+     * home Wi-Fi stops answering the moment the phone moves to mobile data, and DNS would be
+     * dead until the next rebuild. A public resolver answers on any network. The cost is that
+     * lookups go to Cloudflare and Quad9 rather than to your provider, and that a captive
+     * portal which only answers its own DNS may not load until you sign in with the firewall
+     * off. This was always the behaviour in practice — the monitor had no answer yet when the
+     * tunnel was built, so it fell back to these — and is now stated rather than accidental.
+     */
+    fun tunnelDnsServers(includeIpv6: Boolean): List<InetAddress> =
+        if (includeIpv6) PUBLIC_RESOLVERS else PUBLIC_RESOLVERS.filterIsInstance<Inet4Address>()
 
     private companion object {
         const val TAG = "NetworkMonitor"
 
-        /** Used only when the platform will not tell us what the link's resolvers are. */
-        val FALLBACK_DNS: List<InetAddress> = listOf(
+        val PUBLIC_RESOLVERS: List<InetAddress> = listOf(
             InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)),
             InetAddress.getByAddress(byteArrayOf(9, 9, 9, 9)),
         )
