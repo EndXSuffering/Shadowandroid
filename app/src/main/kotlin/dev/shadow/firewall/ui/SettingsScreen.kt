@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.shadow.firewall.R
+import dev.shadow.firewall.core.DnsMode
 
 /**
  * Global policy, the domain lists, and the escape hatch that clears every rule.
@@ -87,6 +89,8 @@ fun SettingsScreen(viewModel: FirewallViewModel, modifier: Modifier = Modifier) 
                 onCheckedChange = viewModel::setAutoStartOnBoot,
             )
         }
+
+        DnsCard(mode = settings.dnsMode, onModeChange = viewModel::setDnsMode)
 
         BlocklistSection(
             statuses = blocklistStatuses,
@@ -152,6 +156,51 @@ fun SettingsScreen(viewModel: FirewallViewModel, modifier: Modifier = Modifier) 
                     Text(stringResource(R.string.action_cancel))
                 }
             },
+        )
+    }
+}
+
+/**
+ * Where the lookups the firewall lets through are sent. Blocking happens before this choice
+ * either way, so it changes who sees your lookups, not what gets filtered.
+ */
+@Composable
+private fun DnsCard(mode: DnsMode, onModeChange: (DnsMode) -> Unit) {
+    SettingsCard(stringResource(R.string.settings_dns)) {
+        Text(
+            stringResource(R.string.dns_mode_summary),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (option in DnsMode.entries) {
+                FilterChip(
+                    selected = mode == option,
+                    onClick = { onModeChange(option) },
+                    label = {
+                        Text(
+                            stringResource(
+                                when (option) {
+                                    DnsMode.NETWORK_ON_WIFI -> R.string.dns_mode_wifi
+                                    DnsMode.NETWORK_ALWAYS -> R.string.dns_mode_always
+                                    DnsMode.PUBLIC -> R.string.dns_mode_public
+                                },
+                            ),
+                        )
+                    },
+                )
+            }
+        }
+        Text(
+            stringResource(
+                when (mode) {
+                    DnsMode.NETWORK_ON_WIFI -> R.string.dns_mode_wifi_detail
+                    DnsMode.NETWORK_ALWAYS -> R.string.dns_mode_always_detail
+                    DnsMode.PUBLIC -> R.string.dns_mode_public_detail
+                },
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

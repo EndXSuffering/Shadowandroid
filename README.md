@@ -247,12 +247,15 @@ Worth knowing before you rely on it:
   the tunnel was up, with every one of its connections allowed. Such apps are pinned to the top
   of the list and marked; *Skip the firewall* sends their traffic out as if the firewall were
   off, while everything else stays filtered.
-- **DNS goes to Cloudflare and Quad9, not your network's resolver.** The tunnel advertises
-  `1.1.1.1` and `9.9.9.9` to apps. Its DNS servers are fixed when it starts, and a router address
-  from home Wi-Fi stops answering the moment the phone moves to mobile data; a public resolver
-  works on any network. The trade is that those two providers see your lookups rather than your
-  ISP, and a hotel or airport sign-in page that only answers its own DNS may not load — sign in
-  with the firewall stopped, then start it again.
+- **Who answers your lookups is a setting.** The tunnel tells apps to use a stand-in DNS server
+  that exists only inside the firewall. Every lookup reaches the firewall, the domain rules
+  apply, and what is allowed is forwarded to a real server picked at that moment — so following
+  the network costs nothing when you switch. *Settings → DNS server* offers three choices: the
+  network's own DNS **on Wi-Fi** only (the default; Cloudflare `1.1.1.1` and Quad9 `9.9.9.9` on
+  mobile data), **always** the current network's (your carrier's on mobile data), or **never**
+  (Cloudflare and Quad9 everywhere). Blocking is identical in all three; the choice is who sees
+  the names you look up. An app or browser that brings its own encrypted DNS is not affected by
+  this setting — see *Force filterable DNS* above.
 - **Only one VPN can be active at a time.** Turning this on displaces any other VPN. That
   includes Orbot's own VPN mode — which is why Tor routing here talks to Orbot's SOCKS proxy
   instead, and why Orbot should be left in proxy mode rather than "VPN mode" while this app is
@@ -457,7 +460,7 @@ to get subtly wrong and the hardest to debug on a device, so they live where a p
 
 ## Testing status
 
-`core/` has 163 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
+`core/` has 175 unit tests covering checksums, IPv4 and IPv6 round trips, sequence-number
 wrapping, RST generation, DNS parsing (including compression-pointer loops and truncated
 input), suffix matching, cache expiry, blocklist parsing across all three formats, the
 hash-set index, wildcard patterns (including the ones refused for being too broad), and the SOCKS5 client — including replies split across reads, a refusal, and

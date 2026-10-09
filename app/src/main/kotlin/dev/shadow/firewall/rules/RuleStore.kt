@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dev.shadow.firewall.core.AppRule
+import dev.shadow.firewall.core.DnsMode
 import dev.shadow.firewall.core.RuleEngine
 import dev.shadow.firewall.core.RuleSet
 import dev.shadow.firewall.core.SeededRules
@@ -41,6 +42,8 @@ private data class StoredRules(
     val updateFrequency: String = UpdateFrequency.DAILY.name,
     val trackerProtection: String = TrackerProtection.BALANCED.name,
     val updateOnUnmeteredOnly: Boolean = true,
+    /** Absent from older saves, which then pick up the default: the Wi-Fi network's own DNS. */
+    val dnsMode: String = DnsMode.NETWORK_ON_WIFI.name,
     val blocklistMetadata: Map<String, BlocklistMetadata> = emptyMap(),
     /**
      * How many releases of [SeededRules] have been written into the domain lists. Stored so
@@ -83,6 +86,8 @@ data class FirewallSettings(
     val updateFrequency: UpdateFrequency = UpdateFrequency.DAILY,
     val updateOnUnmeteredOnly: Boolean = true,
     val trackerProtection: TrackerProtection = TrackerProtection.BALANCED,
+    /** Where lookups the firewall lets through are sent. Not a filtering rule, so not in RuleSet. */
+    val dnsMode: DnsMode = DnsMode.NETWORK_ON_WIFI,
 )
 
 /**
@@ -155,6 +160,9 @@ class RuleStore(private val context: Context) {
     private fun parseFrequency(name: String): UpdateFrequency =
         runCatching { UpdateFrequency.valueOf(name) }.getOrDefault(UpdateFrequency.DAILY)
 
+    private fun parseDnsMode(name: String): DnsMode =
+        runCatching { DnsMode.valueOf(name) }.getOrDefault(DnsMode.NETWORK_ON_WIFI)
+
     private fun parseTrackerProtection(name: String): TrackerProtection =
         runCatching { TrackerProtection.valueOf(name) }.getOrDefault(TrackerProtection.BALANCED)
 
@@ -167,6 +175,8 @@ class RuleStore(private val context: Context) {
         update { it.copy(rules = it.rules.copy(blockIpv6 = enabled)) }
 
     suspend fun setAutoStartOnBoot(enabled: Boolean) = update { it.copy(autoStartOnBoot = enabled) }
+
+    suspend fun setDnsMode(mode: DnsMode) = update { it.copy(dnsMode = mode) }
 
     /** Replaces the blocklist from newline- or comma-separated text. */
     suspend fun setBlockedDomains(text: String) = update {
@@ -309,6 +319,7 @@ class RuleStore(private val context: Context) {
         updateFrequency = parseFrequency(updateFrequency),
         updateOnUnmeteredOnly = updateOnUnmeteredOnly,
         trackerProtection = parseTrackerProtection(trackerProtection),
+        dnsMode = parseDnsMode(dnsMode),
     )
 
     private fun FirewallSettings.toStored() = StoredRules(
@@ -322,6 +333,7 @@ class RuleStore(private val context: Context) {
         updateFrequency = updateFrequency.name,
         updateOnUnmeteredOnly = updateOnUnmeteredOnly,
         trackerProtection = trackerProtection.name,
+        dnsMode = dnsMode.name,
         apps = rules.appRules.values.map { StoredAppRule(it.uid, it.blockWifi, it.blockMobile) },
         allowedUids = rules.allowedUids.toList(),
         blockedDomains = rules.blockedDomains.toList().sorted(),

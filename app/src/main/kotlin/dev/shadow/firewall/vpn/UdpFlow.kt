@@ -30,6 +30,12 @@ class UdpFlow(
     private val onResponse: (UdpFlow, ByteArray) -> Unit,
     private val onBytes: (sent: Long, received: Long) -> Unit,
     private val onClosed: (UdpFlow) -> Unit,
+    /**
+     * Where the socket really connects, when that differs from [remoteAddress]. Set for lookups
+     * sent to the tunnel's stand-in resolver: they go to a real server, but the reply must look
+     * as though the stand-in sent it, or the asking resolver would discard it.
+     */
+    private val upstream: InetSocketAddress? = null,
 ) : SelectableFlow {
 
     val isDns: Boolean get() = remotePort == DNS_PORT
@@ -57,7 +63,7 @@ class UdpFlow(
                 return false
             }
             // Connecting fixes the peer so reads only accept replies from that server.
-            channel.connect(InetSocketAddress(remoteAddress, remotePort))
+            channel.connect(upstream ?: InetSocketAddress(remoteAddress, remotePort))
             selectorLoop.register(channel, SelectionKey.OP_READ, this)
             true
         } catch (error: IOException) {

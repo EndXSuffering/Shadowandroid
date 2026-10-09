@@ -14,6 +14,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import dev.shadow.firewall.FirewallApp
 import dev.shadow.firewall.R
+import dev.shadow.firewall.core.DnsMode
+import dev.shadow.firewall.core.DnsUpstream
 import dev.shadow.firewall.core.RuleEngine
 import dev.shadow.firewall.core.RuleSet
 import dev.shadow.firewall.core.Tor
@@ -68,6 +70,12 @@ class FirewallVpnService : VpnService() {
 
     private val ruleEngine = RuleEngine()
 
+    /**
+     * Where forwarded lookups go. Read per lookup by the relay, so changing it takes effect on
+     * the next query without rebuilding the tunnel.
+     */
+    @Volatile private var dnsMode: DnsMode = DnsMode.NETWORK_ON_WIFI
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -114,6 +122,7 @@ class FirewallVpnService : VpnService() {
             // which routes the interface gets, so it cannot be applied afterwards.
             val initial = app.ruleStore.settings.first()
             ruleEngine.rules = initial.rules
+            dnsMode = initial.dnsMode
             ruleEngine.torUids = app.appRepository.uidsFor(initial.rules.torPackages)
             ruleEngine.blocklists = app.blocklistRepository.index.value
             establishedShape = shapeOf(initial.rules)
@@ -129,6 +138,7 @@ class FirewallVpnService : VpnService() {
             // Keep the engine's snapshot in step with what the user configures from here on.
             app.ruleStore.settings.collect { settings ->
                 ruleEngine.rules = settings.rules
+                dnsMode = settings.dnsMode
                 // Routing is stored by package but enforced by uid, so re-resolve on every
                 // change: an app reinstalled while the tunnel is up comes back with a new uid.
                 ruleEngine.torUids = app.appRepository.uidsFor(settings.rules.torPackages)
@@ -151,7 +161,7 @@ class FirewallVpnService : VpnService() {
     private fun bringUp(app: FirewallApp) {
         val monitor = NetworkMonitor(this).also { it.start(); networkMonitor = it }
 
-        val descriptor = establishTunnel(monitor)
+        val descriptor = establishTunnel()
         if (descriptor == null) {
             Log.e(TAG, "could not establish the tunnel")
             _state.value = VpnState.Stopped
@@ -174,6 +184,9 @@ class FirewallVpnService : VpnService() {
             onBytes = app.trafficLog::recordBytes,
             protectTcp = { channel: SocketChannel -> protect(channel.socket()) },
             protectUdp = { channel: DatagramChannel -> protect(channel.socket()) },
+            dnsUpstreams = {
+                DnsUpstream.choose(dnsMode, monitor.defaultIsWifi, monitor.defaultDnsServers)
+            },
         )
         relay.start()
         this.relay = relay
@@ -191,7 +204,7 @@ class FirewallVpnService : VpnService() {
         Log.i(TAG, "tunnel established")
     }
 
-    private fun establishTunnel(monitor: NetworkMonitor): ParcelFileDescriptor? {
+    private fun establishTunnel(): ParcelFileDescriptor? {
         val blockIpv6 = ruleEngine.rules.blockIpv6
         val builder = Builder()
             .setSession(getString(R.string.app_name))
@@ -206,10 +219,11 @@ class FirewallVpnService : VpnService() {
             builder.addRoute("::", 0)
         }
 
-        for (server in monitor.tunnelDnsServers(includeIpv6 = !blockIpv6)) {
-            // Public resolvers, chosen deliberately — see tunnelDnsServers for why not the
-            // network's own. Queries to them still come through the tunnel, where the domain
-            // rules are applied.
+        // Stand-in resolvers that exist only inside the tunnel. Every lookup arrives at the relay,
+        // which applies the domain rules and forwards what it allows to a server picked for the
+        // network the phone is on at that moment — so Wi-Fi's own DNS can be used at home without
+        // DNS dying when the phone moves to mobile data, which a real address fixed here would.
+        for (server in DnsUpstream.VIRTUAL_RESOLVERS) {
             runCatching { builder.addDnsServer(server) }
         }
 

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.shadow.firewall.FirewallApp
 import dev.shadow.firewall.core.AppRule
 import dev.shadow.firewall.core.ConnectionEvent
+import dev.shadow.firewall.core.DnsMode
 import dev.shadow.firewall.core.NetworkType
 import dev.shadow.firewall.core.Verdict
 import dev.shadow.firewall.rules.BlocklistStatus
@@ -222,6 +223,11 @@ class FirewallViewModel(application: Application) : AndroidViewModel(application
 
     fun setBlockIpv6(enabled: Boolean) {
         viewModelScope.launch { app.ruleStore.setBlockIpv6(enabled) }
+    }
+
+    /** Applies to the next lookup; the tunnel does not need rebuilding. */
+    fun setDnsMode(mode: DnsMode) {
+        viewModelScope.launch { app.ruleStore.setDnsMode(mode) }
     }
 
     fun setAutoStartOnBoot(enabled: Boolean) {

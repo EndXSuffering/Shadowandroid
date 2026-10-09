@@ -52,6 +52,8 @@ class TcpFlow(
     private val onClosed: (TcpFlow) -> Unit,
     /** A local SOCKS5 proxy to relay through, or null to dial the server directly. */
     private val proxyAddress: InetSocketAddress? = null,
+    /** Where to really connect, when [remoteAddress] is the tunnel's stand-in resolver. */
+    private val upstream: InetSocketAddress? = null,
 ) : SelectableFlow {
 
     enum class State { CONNECTING, PROXY, HANDSHAKE, ESTABLISHED, CLOSED }
@@ -139,7 +141,7 @@ class TcpFlow(
                 abort()
                 return
             }
-            channel.connect(proxyAddress ?: InetSocketAddress(remoteAddress, remotePort))
+            channel.connect(proxyAddress ?: upstream ?: InetSocketAddress(remoteAddress, remotePort))
             selectorLoop.register(channel, SelectionKey.OP_CONNECT, this)
         } catch (error: IOException) {
             Log.d(TAG, "connect failed for $key: ${error.message}")

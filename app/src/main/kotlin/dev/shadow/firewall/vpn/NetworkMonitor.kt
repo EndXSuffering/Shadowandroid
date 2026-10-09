@@ -8,7 +8,6 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
 import dev.shadow.firewall.core.NetworkType
-import java.net.Inet4Address
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
@@ -80,10 +79,71 @@ class NetworkMonitor(context: Context) {
             .build()
         try {
             connectivityManager.registerNetworkCallback(request, callback)
+            connectivityManager.registerDefaultNetworkCallback(defaultCallback)
         } catch (error: SecurityException) {
             Log.w(TAG, "cannot register network callback", error)
         }
         seedFromActiveNetwork()
+    }
+
+    // ------------------------------------------------------------ default network
+
+    /**
+     * The resolvers advertised by the network this app's own sockets go out on — which, since
+     * the app excludes itself from its tunnel, is the physical network underneath, not the VPN.
+     * Lookups the firewall forwards travel on that network, so these are the servers reachable
+     * from it: a home router's address is only valid while that router is the way out.
+     */
+    @Volatile
+    var defaultDnsServers: List<InetAddress> = emptyList()
+        private set
+
+    /** Whether that network is Wi-Fi, for "use the network's DNS on Wi-Fi only". */
+    @Volatile
+    var defaultIsWifi: Boolean = false
+        private set
+
+    @Volatile
+    private var defaultNetwork: Network? = null
+
+    /**
+     * Follows Android's choice of default network directly, rather than inferring it from the
+     * links above: it is exactly the network a forwarded lookup will leave on, including a
+     * Wi-Fi network Android has not validated yet, such as one behind a sign-in page.
+     */
+    private val defaultCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            adoptDefault(network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            if (network == defaultNetwork) {
+                defaultIsWifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+            }
+        }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            if (network == defaultNetwork) defaultDnsServers = linkProperties.dnsServers
+        }
+
+        override fun onLost(network: Network) {
+            // A switch arrives as onAvailable for the new network; this only clears the state
+            // when the old default is lost with nothing taking its place.
+            if (network == defaultNetwork) {
+                defaultNetwork = null
+                defaultDnsServers = emptyList()
+                defaultIsWifi = false
+            }
+        }
+    }
+
+    /** Reads a new default network's details at once, so no lookup sees the old network's. */
+    private fun adoptDefault(network: Network) {
+        defaultNetwork = network
+        connectivityManager.getNetworkCapabilities(network)?.let {
+            defaultIsWifi = it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        }
+        connectivityManager.getLinkProperties(network)?.let { defaultDnsServers = it.dnsServers }
     }
 
     /**
@@ -99,6 +159,7 @@ class NetworkMonitor(context: Context) {
     private fun seedFromActiveNetwork() {
         try {
             val network = connectivityManager.activeNetwork ?: return
+            if (defaultNetwork == null) adoptDefault(network)
             val link = links.getOrPut(network) { Link() }
             if (link.capabilities == null) {
                 link.capabilities = connectivityManager.getNetworkCapabilities(network)
@@ -115,6 +176,10 @@ class NetworkMonitor(context: Context) {
     fun stop() {
         try {
             connectivityManager.unregisterNetworkCallback(callback)
+        } catch (ignored: IllegalArgumentException) {
+        }
+        try {
+            connectivityManager.unregisterNetworkCallback(defaultCallback)
         } catch (ignored: IllegalArgumentException) {
         }
         links.clear()
@@ -150,27 +215,7 @@ class NetworkMonitor(context: Context) {
         strictPrivateDnsHostname = strictPrivateDns
     }
 
-    /**
-     * The resolvers the tunnel advertises to apps.
-     *
-     * Deliberately public ones, not the network's own. The tunnel's DNS servers are fixed
-     * when it is established, but the network underneath is not: a router address taken from
-     * home Wi-Fi stops answering the moment the phone moves to mobile data, and DNS would be
-     * dead until the next rebuild. A public resolver answers on any network. The cost is that
-     * lookups go to Cloudflare and Quad9 rather than to your provider, and that a captive
-     * portal which only answers its own DNS may not load until you sign in with the firewall
-     * off. This was always the behaviour in practice — the monitor had no answer yet when the
-     * tunnel was built, so it fell back to these — and is now stated rather than accidental.
-     */
-    fun tunnelDnsServers(includeIpv6: Boolean): List<InetAddress> =
-        if (includeIpv6) PUBLIC_RESOLVERS else PUBLIC_RESOLVERS.filterIsInstance<Inet4Address>()
-
     private companion object {
         const val TAG = "NetworkMonitor"
-
-        val PUBLIC_RESOLVERS: List<InetAddress> = listOf(
-            InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)),
-            InetAddress.getByAddress(byteArrayOf(9, 9, 9, 9)),
-        )
     }
 }

@@ -5,6 +5,7 @@ import dev.shadow.firewall.core.ConnectionEvent
 import dev.shadow.firewall.core.Decision
 import dev.shadow.firewall.core.BlockReason
 import dev.shadow.firewall.core.Dns
+import dev.shadow.firewall.core.DnsUpstream
 import dev.shadow.firewall.core.EncryptedDns
 import dev.shadow.firewall.core.FlowKey
 import dev.shadow.firewall.core.HostnameCache
@@ -53,6 +54,11 @@ class TunnelRelay(
     private val protectUdp: (DatagramChannel) -> Boolean,
     /** Where Tor is listening, for the apps the user has routed through it. */
     private val torProxy: InetSocketAddress = InetSocketAddress(Tor.SOCKS_HOST, Tor.SOCKS_PORT),
+    /**
+     * The real servers behind the tunnel's stand-in resolver, best first. Asked afresh for each
+     * lookup, so a change of network or of the DNS setting applies to the very next query.
+     */
+    private val dnsUpstreams: () -> List<InetAddress> = { DnsUpstream.PUBLIC_RESOLVERS },
 ) {
 
     private val sink = TunWriter(tunOutput)
@@ -193,6 +199,17 @@ class TunnelRelay(
             return
         }
 
+        // The stand-in resolver only stands in for DNS on port 53. Anything else aimed at it —
+        // Android probing it for DNS-over-TLS, say — has no real server behind it, and an
+        // immediate reset lets the prober move on instead of waiting out a connect timeout.
+        val upstream = upstreamFor(packet.destinationAddress, segment.destinationPort)
+        if (DnsUpstream.isVirtualResolver(packet.destinationAddress) &&
+            segment.destinationPort != DnsUpstream.PORT
+        ) {
+            sink.write(PacketFactory.buildRstFor(segment))
+            return
+        }
+
         val decision = judge(key, packet, segment.sourcePort, segment.destinationPort, IpProto.TCP)
         if (decision.isBlocked) {
             sink.write(PacketFactory.buildRstFor(segment))
@@ -215,7 +232,10 @@ class TunnelRelay(
                 tcpFlows.remove(closed.key, closed)
                 uidResolver.forget(closed.key)
             },
-            proxyAddress = if (decision.viaTor) torProxy else null,
+            // A lookup goes to the network's resolver, never through Tor: an exit node cannot
+            // reach a home router, and the app's own connection is what Tor is protecting.
+            proxyAddress = if (decision.viaTor && upstream == null) torProxy else null,
+            upstream = upstream,
         )
         tcpFlows[key] = flow
         flow.open(segment, protectTcp)
@@ -278,6 +298,7 @@ class TunnelRelay(
                 udpFlows.remove(closed.key, closed)
                 uidResolver.forget(closed.key)
             },
+            upstream = upstreamFor(packet.destinationAddress, datagram.destinationPort),
         )
         udpFlows[key] = flow
         if (flow.open(protectUdp)) {
@@ -344,6 +365,17 @@ class TunnelRelay(
 
         if (uid != null) logBlockedLookup(key, datagram, name, decision, uid)
         return true
+    }
+
+    /**
+     * The real server behind a stand-in resolver address, or null for any other destination.
+     *
+     * Chosen per flow, and each lookup normally arrives on a fresh source port, so moving from
+     * Wi-Fi to mobile data — or changing the DNS setting — redirects the very next query.
+     */
+    private fun upstreamFor(destination: InetAddress, port: Int): InetSocketAddress? {
+        if (!DnsUpstream.isVirtualResolver(destination)) return null
+        return InetSocketAddress(DnsUpstream.upstreamFor(destination, dnsUpstreams()), port)
     }
 
     /**

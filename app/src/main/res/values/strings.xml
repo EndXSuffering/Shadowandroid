@@ -86,6 +86,15 @@
     <string name="setting_auto_start">Start on boot</string>
     <string name="setting_auto_start_summary">Bring the firewall back up after a restart, as long as VPN permission is still granted.</string>
 
+    <string name="settings_dns">DNS server</string>
+    <string name="dns_mode_summary">Use your network\'s own DNS server for lookups the firewall allows. Blocking works the same either way; this decides who sees the names you look up.</string>
+    <string name="dns_mode_wifi">On Wi‑Fi</string>
+    <string name="dns_mode_always">Always</string>
+    <string name="dns_mode_public">Never</string>
+    <string name="dns_mode_wifi_detail">On Wi‑Fi, lookups go to that network\'s DNS — usually your router, and so your internet provider. On mobile data they go to Cloudflare (1.1.1.1) and Quad9 (9.9.9.9). Switching networks takes effect on the next lookup.</string>
+    <string name="dns_mode_always_detail">Lookups go to whatever DNS the current network provides: your router on Wi‑Fi, your carrier on mobile data. Cloudflare and Quad9 are only used if a network offers none.</string>
+    <string name="dns_mode_public_detail">Lookups always go to Cloudflare (1.1.1.1) and Quad9 (9.9.9.9), whatever network you are on. They see the names you look up; your provider does not.</string>
+
     <string name="settings_blocklists">Ad and malware lists</string>
     <string name="setting_use_blocklists">Use subscribed lists</string>
     <string name="blocklist_total">%1$s domains and addresses loaded</string>
